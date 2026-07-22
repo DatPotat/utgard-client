@@ -1,0 +1,112 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true,
+    "output": "logs/sing-box.log"
+  },
+
+  "dns": {
+    "servers": [
+      { "tag": "local", "type": "local" },
+      {
+        "tag": "doh",
+        "type": "h3",
+        "server": "dns.google",
+        "server_port": 443,
+        "path": "/dns-query",
+        "detour": "utgard",
+        "domain_resolver": "local"
+      }
+    ],
+    "rules": [
+      { "domain": ["example.com"], "server": "local" },
+      { "rule_set": ["general"], "server": "doh" }
+    ],
+    "final": "local",
+    "strategy": "ipv4_only"
+  },
+
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": ["172.30.30.1/30"],
+      "mtu": 1430,
+      "auto_route": true,
+      "strict_route": false,
+      "stack": "system"
+    }
+  ],
+
+  "outbounds": [
+    { "type": "direct", "tag": "direct" },
+    {
+      "type": "hysteria2",
+      "tag": "utgard-hy2",
+      "server": "example.com",
+      "server_port": 443,
+      "password": "changeme",
+      "tls": {
+        "enabled": true,
+        "server_name": "example.com",
+        "alpn": ["h3"]
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "utgard-vless",
+      "server": "example.com",
+      "server_port": 443,
+      "uuid": "00000000-0000-0000-0000-000000000000",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "jetbrains.com",
+        "utls": { "enabled": true, "fingerprint": "chrome" },
+        "reality": {
+          "enabled": true,
+          "public_key": "changeme",
+          "short_id": "changeme"
+        }
+      }
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "utgard-ss",
+      "server": "example.com",
+      "server_port": 8388,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "changeme"
+    },
+    {
+      "type": "selector",
+      "tag": "utgard",
+      "outbounds": ["utgard-hy2", "utgard-vless", "utgard-ss"],
+      "default": "utgard-hy2"
+    }
+  ],
+
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "local",
+    "final": "direct",
+
+    "rule_set": [
+      {
+        "type": "local",
+        "tag": "general",
+        "format": "binary",
+        "path": "lists/general.srs"
+      }
+    ],
+
+    "rules": [
+      { "action": "sniff" },
+      { "protocol": "dns", "action": "hijack-dns" },
+      { "domain": ["example.com"], "action": "route", "outbound": "direct" },
+      { "ip_is_private": true, "action": "route", "outbound": "direct" },
+      { "ip_cidr": ["100.64.0.0/10"], "action": "route", "outbound": "direct" },
+      { "rule_set": ["general"], "action": "route", "outbound": "utgard" }
+    ]
+  }
+}
