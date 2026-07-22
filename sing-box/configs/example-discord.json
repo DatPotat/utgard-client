@@ -1,0 +1,18 @@
+{
+  "route": {
+    "rules": [
+      {
+        "process_name": ["Discord.exe", "Update.exe"],
+        "action": "route",
+        "outbound": "utgard"
+      },
+      {
+        "process_path": [
+          "C:\\Users\\ВАШ_ПОЛЬЗОВАТЕЛЬ\\AppData\\Local\\Discord\\Update.exe"
+        ],
+        "action": "route",
+        "outbound": "utgard"
+      }
+    ]
+  }
+}
