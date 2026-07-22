@@ -1,0 +1,41 @@
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local agents
+.claude/
+.cursor/
+.codex/
+.gemini/
+.opencode/
+.mcp.json
+claude_desktop_config.json
+*.log
+*.sqlite
+*.sqlite3
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+credentials.json
+service-account*.json
+secrets*.json
+token.json
+
+# sing-box runtime (binary, credentials, logs, state)
+sing-box/sing-box.exe
+sing-box/*.dll
+bin/state/
+logs/
+
+# build artefacts
+.build-staging/
+utgard-client-*.zip
