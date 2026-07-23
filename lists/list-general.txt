@@ -233,6 +233,9 @@ protontech.ch
 protonvpn.ch
 protonvpn.com
 protonweb.com
+mail.proton.me
+account.proton.me
+mail-api.proton.me
 
 # ----- Twitter -----
 ads-twitter.com
@@ -291,5 +294,17 @@ twitch.tv
 twitchcdn.net
 twitchcon.com
 twitchsvc.net
+
+# ----- Hetzner -----
+hetzner.com
+console.hetzner.com
+sentry.hetzner.com
+api.hetzner.cloud
+use.hetzner.com
+api.hetzner.com
+
+# ----- NameCheap -----
+namecheap.com
+static.nc-img.com
 
 # ----- etc -----
