@@ -1,0 +1,7 @@
+#include <windows.h>
+
+/* CREATEPROCESS_MANIFEST_RESOURCE_ID = 1 */
+1 RT_MANIFEST "utgard.manifest"
+
+/* The lowest icon ID is the one Explorer shows for the executable. */
+1 ICON "utgard.ico"
