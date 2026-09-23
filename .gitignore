@@ -39,3 +39,4 @@ logs/
 
 # build artefacts
 bin/
+build/
