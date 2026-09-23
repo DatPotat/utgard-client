@@ -397,3 +397,68 @@ int net_resolve4(const char *host_utf8, char out[][16], int max)
     freeaddrinfo(ai);
     return n;
 }
+
+int net_redirect(const wchar_t *url, wchar_t *location, size_t cap,
+                 wchar_t *err, size_t errcap)
+{
+    URL_COMPONENTS uc;
+    wchar_t   host[256], upath[2048];
+    HINTERNET session = NULL, conn = NULL, req = NULL;
+    DWORD     status = 0, len = sizeof status;
+    DWORD     never = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+    int       ok = 0;
+
+    ZeroMemory(&uc, sizeof uc);
+    uc.dwStructSize     = sizeof uc;
+    uc.lpszHostName     = host;
+    uc.dwHostNameLength = (DWORD)(sizeof host / sizeof host[0]);
+    uc.lpszUrlPath      = upath;
+    uc.dwUrlPathLength  = (DWORD)(sizeof upath / sizeof upath[0]);
+
+    if (!WinHttpCrackUrl(url, 0, 0, &uc) || uc.nScheme != INTERNET_SCHEME_HTTPS)
+        return fail(err, errcap, L"Неверный адрес");
+
+    session = WinHttpOpen(L"utgard/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!session) return fail_code(err, errcap, L"Не удалось открыть сессию",
+                                   GetLastError());
+    WinHttpSetTimeouts(session, 10000, 10000, 10000, 15000);
+
+    conn = WinHttpConnect(session, host, uc.nPort, 0);
+    if (!conn) { fail_code(err, errcap, L"Не удалось подключиться", GetLastError());
+                 goto done; }
+    req = WinHttpOpenRequest(conn, L"HEAD", upath, NULL, WINHTTP_NO_REFERER,
+                             WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (!req) { fail_code(err, errcap, L"Не удалось создать запрос", GetLastError());
+                goto done; }
+    WinHttpSetOption(req, WINHTTP_OPTION_REDIRECT_POLICY, &never, sizeof never);
+
+    if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+        !WinHttpReceiveResponse(req, NULL)) {
+        fail_code(err, errcap, L"Сервер не ответил", GetLastError());
+        goto done;
+    }
+    if (!WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                             WINHTTP_HEADER_NAME_BY_INDEX, &status, &len,
+                             WINHTTP_NO_HEADER_INDEX) ||
+        status < 300 || status > 399) {
+        if (err && errcap)
+            StringCchPrintfW(err, errcap, L"Неожиданный ответ сервера (код %lu)",
+                             (unsigned long)status);
+        goto done;
+    }
+    len = (DWORD)(cap * sizeof *location);
+    if (!WinHttpQueryHeaders(req, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX,
+                             location, &len, WINHTTP_NO_HEADER_INDEX)) {
+        fail_code(err, errcap, L"В ответе нет адреса перехода", GetLastError());
+        goto done;
+    }
+    ok = 1;
+
+done:
+    if (req) WinHttpCloseHandle(req);
+    if (conn) WinHttpCloseHandle(conn);
+    if (session) WinHttpCloseHandle(session);
+    return ok;
+}

@@ -35,6 +35,7 @@ void settings_defaults(app_settings *s)
     s->stack         = SETTINGS_STACK_DEFAULT;
     s->dns           = SETTINGS_DNS_DEFAULT;
     s->tray_on_close = 1;
+    s->update_check  = 1;
     s->sub_interval  = SETTINGS_SUB_DEFAULT;
     s->sub_last      = 0;
 }
@@ -94,6 +95,8 @@ int settings_load(app_settings *s)
                 if (strcmp(eq + 1, settings_dns[i].host) == 0) s->dns = i;
         } else if (strcmp(line, "tray_on_close") == 0) {
             s->tray_on_close = (eq[1] == '1');
+        } else if (strcmp(line, "update_check") == 0) {
+            s->update_check = (eq[1] == '1');
         } else if (strcmp(line, "sub_interval_hours") == 0) {
             long v = strtol(eq + 1, NULL, 10);
             int  i;
@@ -122,10 +125,10 @@ int settings_save(const app_settings *s)
 
     if (!settings_path(path, MAX_PATH * 2)) return 0;
     if (FAILED(StringCchPrintfA(buf, sizeof buf,
-            "mtu=%d\r\nlog_level=%s\r\nstack=%s\r\ndns=%s\r\ntray_on_close=%d\r\n"
+            "mtu=%d\r\nlog_level=%s\r\nstack=%s\r\ndns=%s\r\ntray_on_close=%d\r\nupdate_check=%d\r\n"
             "sub_interval_hours=%d\r\nsub_last=%lld\r\n",
             s->mtu, settings_log_levels[lvl], settings_stacks[stk],
-            settings_dns[dns].host, s->tray_on_close ? 1 : 0,
+            settings_dns[dns].host, s->tray_on_close ? 1 : 0, s->update_check ? 1 : 0,
             settings_sub_hours[sub], s->sub_last)))
         return 0;
 

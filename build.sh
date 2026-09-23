@@ -14,7 +14,7 @@
 
 set -e
 
-SRC="src/main.c src/zapret.c src/link.c src/profiles.c src/ask.c src/net.c src/genconf.c src/singbox.c src/lists.c src/zapret_exclude.c src/apps.c src/pick.c src/settings.c src/tray.c src/fileio.c vendor/parson/parson.c"
+SRC="src/main.c src/zapret.c src/link.c src/profiles.c src/ask.c src/net.c src/genconf.c src/singbox.c src/lists.c src/zapret_exclude.c src/apps.c src/pick.c src/settings.c src/tray.c src/fileio.c src/autostart.c src/update.c src/shellopen.c vendor/parson/parson.c"
 RC="res/utgard.rc"
 # The executable ships in bin\, and the client treats bin\'s parent as the
 # product root. Building anywhere else would give development a different
@@ -101,7 +101,7 @@ else
     MODE="-O2 -s"
     MODE_NAME="рабочая, символы убраны"
 fi
-LIBS="-lgdi32 -luser32 -ldwmapi -lole32 -luuid -lcrypt32 -lwinhttp -lws2_32 -liphlpapi -luxtheme -lbcrypt -lcomctl32"
+LIBS="-lgdi32 -luser32 -ldwmapi -lole32 -luuid -lcrypt32 -lwinhttp -lws2_32 -liphlpapi -luxtheme -lbcrypt -lcomctl32 -loleaut32 -ltaskschd"
 
 # Source is UTF-8 and UI strings are wide literals. Pinning the charsets
 # makes that explicit, but the options need libiconv, which some GCC
@@ -117,7 +117,7 @@ rm -f build/.probe.c build/.probe.o
 # ---- build -----------------------------------------------------------
 
 MISSING=""
-for f in $SRC src/zapret.h src/link.h src/profiles.h src/ask.h src/net.h src/lists.h src/genconf.h src/singbox.h res/utgard.rc res/utgard.manifest res/utgard.ico; do
+for f in $SRC src/zapret.h src/link.h src/profiles.h src/ask.h src/net.h src/lists.h src/genconf.h src/singbox.h src/autostart.h src/update.h src/shellopen.h src/version.h res/utgard.rc res/utgard.manifest res/utgard.ico; do
     [ -f "$f" ] || MISSING="$MISSING $f"
 done
 if [ -n "$MISSING" ]; then
