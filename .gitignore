@@ -38,4 +38,4 @@ bin/state/
 logs/
 
 # build artefacts
-utgard-client-*.zip
+bin/
