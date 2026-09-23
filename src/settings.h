@@ -17,6 +17,7 @@ typedef struct {
     int stack;          /* index into settings_stacks */
     int dns;            /* index into settings_dns */
     int tray_on_close;  /* the cross hides to the tray instead of exiting */
+    int update_check;   /* look for a newer release on start */
     int sub_interval;   /* index into settings_sub_hours */
     long long sub_last; /* when the subscription last loaded, Unix seconds */
 } app_settings;

@@ -23,6 +23,11 @@ int net_fetch(const wchar_t *url, char **body, size_t *len,
 int net_download(const wchar_t *url, const wchar_t *path,
                  wchar_t *err, size_t errcap);
 
+/* Where an https URL redirects to, without following it: HEAD request, the
+   Location header of a 3xx answer. Used for GitHub's releases/latest. */
+int net_redirect(const wchar_t *url, wchar_t *location, size_t cap,
+                 wchar_t *err, size_t errcap);
+
 /* IPv4 addresses of a host, through the system resolver - the same path the
    generated config gives the proxy servers, which route to "local" so they can
    be resolved before the tunnel exists. Returns how many were written. */

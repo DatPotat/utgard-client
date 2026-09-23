@@ -22,6 +22,10 @@
 #include "apps.h"
 #include "pick.h"
 #include "settings.h"
+#include "autostart.h"
+#include "shellopen.h"
+#include "update.h"
+#include "version.h"
 #include "tray.h"
 #include "lists.h"
 
@@ -102,6 +106,9 @@
 #define ID_SET_DNS     956
 #define ID_SET_TRAY    957
 #define ID_SET_SUB     958
+#define ID_SET_AUTO    961
+#define ID_SET_UPD     962
+#define ID_SET_UPD_NOW 963
 #define ID_PING_NOW    959
 #define ID_ZAP_LIST    960
 
@@ -117,6 +124,7 @@
 #define WM_APP_EXC_START   (WM_APP + 7)
 #define WM_APP_TRAY        (WM_APP + 8)     /* notification-area icon events */
 #define WM_APP_SHOW        (WM_APP + 9)     /* a second launch asks us to show */
+#define WM_APP_UPD_DONE    (WM_APP + 11)    /* release check finished */
 #define WM_APP_JOB_DONE    (WM_APP + 10)    /* a background job finished */
 
 #define ID_TRAY_OPEN   1901
@@ -185,10 +193,11 @@ static int     g_ed_enabled;                 /* kept across an edit */
 static app_settings g_set;
 static UINT         g_taskbar_created;   /* Explorer restarted */
 static HWND    g_set_open, g_set_mtu, g_set_log, g_set_back, g_set_save;
-static HWND    g_set_stack, g_set_dns, g_set_tray, g_set_sub, g_ping_now, g_zap_list;
+static HWND    g_set_upd, g_set_upd_now;
+static HWND    g_set_stack, g_set_dns, g_set_tray, g_set_auto, g_set_sub, g_ping_now, g_zap_list;
 static long long g_sub_retry;   /* after a failed automatic refresh, not before */
 static int  g_exc_known, g_exc_present;
-static int  g_zap_dirty;   /* settings changed since the strategy started */
+static int  g_zap_dirty;   /* Game Filter changed: it lives in winws arguments; lists are reread live */
 static int            g_busy;        /* a background job is running */
 static const wchar_t *g_busy_text;   /* what it is doing, for the status line */
 static int  g_host_count, g_app_count;
@@ -446,10 +455,16 @@ static void layout(HWND hwnd)
         MoveWindow(g_set_dns,   PAD + S(130), TABS_H + S(220), cw, S(300), TRUE);
         MoveWindow(g_set_sub,   PAD + S(130), TABS_H + S(262), cw, S(300), TRUE);
         MoveWindow(g_set_tray,  PAD, TABS_H + S(318), c.right - PAD * 2, S(28), TRUE);
+        MoveWindow(g_set_auto,  PAD, TABS_H + S(352), c.right - PAD * 2, S(28), TRUE);
+        MoveWindow(g_set_upd,   PAD, TABS_H + S(386), c.right - PAD * 2, S(28), TRUE);
+        MoveWindow(g_set_upd_now, PAD, TABS_H + S(424), S(200), S(30), TRUE);
         ShowWindow(g_set_sub,   sp);
         ShowWindow(g_set_stack, sp);
         ShowWindow(g_set_dns,   sp);
         ShowWindow(g_set_tray,  sp);
+        ShowWindow(g_set_auto,  sp);
+        ShowWindow(g_set_upd,   sp);
+        ShowWindow(g_set_upd_now, sp);
         MoveWindow(g_set_back, PAD, c.bottom - FOOTER_H + S(4), S(100), S(30), TRUE);
         MoveWindow(g_set_save, c.right - PAD - S(130), c.bottom - FOOTER_H + S(4),
                    S(130), S(30), TRUE);
@@ -815,7 +830,7 @@ static void paint_hosts(HDC dc, const RECT *c)
                 L"Список хостов zapret", CLR_TEXT, g_font_big, DT_LEFT);
         text_at(dc, PAD, top + S(40), w, S(50),
                 L"По одному домену в строке. Поддомены подхватываются сами, ^ в начале — "
-                L"только сам домен. Действует после перезапуска стратегии.",
+                L"только сам домен. zapret подхватывает изменения сам, без перезапуска.",
                 CLR_MUTED, g_font_small, DT_LEFT | DT_WORDBREAK);
     } else {
         text_at(dc, PAD, top + S(14), S(260), S(24),
@@ -891,6 +906,8 @@ static void paint_settings(HDC dc, const RECT *c)
             CLR_ACCENT, g_font_small, DT_LEFT);
 
     fill(dc, 0, top + S(304), c->right, S(1), g_brush_line);
+    text_at(dc, PAD + S(216), top + S(430), w - S(216), S(20),
+            L"Версия " UTGARD_VERSION_W, CLR_MUTED, g_font_small, DT_LEFT);
 }
 
 static void paint_zapret(HDC dc, const RECT *c)
@@ -2041,7 +2058,6 @@ static void hosts_save_zapret(HWND hwnd)
         return;
     }
     SendMessageW(g_hedit, EM_SETMODIFY, FALSE, 0);
-    g_zap_dirty = 1;                /* zapret reads the list at start-up */
     g_page = PAGE_ZAPRET;
     layout(hwnd);
 }
@@ -2359,9 +2375,15 @@ static void done_zap_fix(HWND hwnd, long_job *j)
         problem(hwnd, j->msg[0] ? j->msg : L"Не удалось изменить список исключений");
         return;
     }
-    g_zap_dirty   = 1;
     g_exc_known   = j->n1;
     g_exc_present = j->n2;
+    /* winws rereads the list on its own, but keeps the verdict of a connection
+       it has already seen: the tunnel must redial to be left alone. */
+    if (g_vpn_on)
+        MessageBoxW(hwnd, L"Адреса серверов добавлены в исключения zapret. "
+                          L"Выключите и снова включите VPN, чтобы уже открытое "
+                          L"соединение пошло мимо zapret.",
+                    L"Utgard", MB_ICONINFORMATION | MB_OK);
 }
 
 static void act_zapret_fix(HWND hwnd)
@@ -2405,7 +2427,6 @@ static void act_zap_ipset(HWND hwnd)
         problem(hwnd, err[0] ? err : L"Не удалось переключить режим IPSet");
         return;
     }
-    g_zap_dirty = 1;
     layout(hwnd);
 }
 
@@ -2417,7 +2438,6 @@ static void work_ipset_update(long_job *j)
 static void done_ipset_update(HWND hwnd, long_job *j)
 {
     if (!j->ok) { problem(hwnd, j->msg[0] ? j->msg : L"Не удалось обновить список"); return; }
-    g_zap_dirty = 1;
 }
 
 static void act_zap_ipset_update(HWND hwnd)
@@ -2844,6 +2864,10 @@ static void set_open(HWND hwnd)
     SendMessageW(g_set_sub, CB_SETCURSEL, (WPARAM)g_set.sub_interval, 0);
     SetPropW(g_set_tray, L"utgard.checked", (HANDLE)(INT_PTR)(g_set.tray_on_close ? 1 : 0));
     InvalidateRect(g_set_tray, NULL, FALSE);
+    SetPropW(g_set_auto, L"utgard.checked", (HANDLE)(INT_PTR)autostart_get());
+    InvalidateRect(g_set_auto, NULL, FALSE);
+    SetPropW(g_set_upd, L"utgard.checked", (HANDLE)(INT_PTR)(g_set.update_check ? 1 : 0));
+    InvalidateRect(g_set_upd, NULL, FALSE);
     g_page = PAGE_SETTINGS;
     layout(hwnd);
 }
@@ -2874,19 +2898,112 @@ static void set_save(HWND hwnd)
     lvl = SendMessageW(g_set_sub, CB_GETCURSEL, 0, 0);
     g_set.sub_interval = (lvl == CB_ERR) ? SETTINGS_SUB_DEFAULT : (int)lvl;
     g_set.tray_on_close = GetPropW(g_set_tray, L"utgard.checked") != NULL;
+    g_set.update_check  = GetPropW(g_set_upd, L"utgard.checked") != NULL;
 
     if (!settings_save(&g_set)) {
         problem(hwnd, L"Не удалось сохранить настройки");
         return;
     }
+
+    /* The scheduler holds this one; touch it only when the box changed. */
+    {
+        int want = GetPropW(g_set_auto, L"utgard.checked") != NULL;
+        if (want != autostart_get() && !autostart_set(want, msg, 160)) {
+            problem(hwnd, msg);
+            return;
+        }
+    }
     g_page = PAGE_UTGARD;
     layout(hwnd);
+}
+
+/* ---- update check ------------------------------------------------------ */
+
+typedef struct {
+    HWND    hwnd;
+    int     manual;     /* the button, not the start-up check: report everything */
+    int     ok;
+    char    tag[32];
+    wchar_t err[256];
+} upd_job;
+
+static int  g_upd_busy;
+static int  g_upd_pending;     /* found while hidden in the tray: ask on show */
+static char g_upd_tag[32];
+
+static DWORD WINAPI upd_thread(LPVOID param)
+{
+    upd_job *j = (upd_job *)param;
+    wchar_t  loc[1024];
+    char     loc8[1024];
+
+    if (net_redirect(UTGARD_RELEASES_URL, loc, 1024, j->err, 256)) {
+        if (WideCharToMultiByte(CP_UTF8, 0, loc, -1, loc8, sizeof loc8, NULL, NULL) &&
+            update_tag_from_location(loc8, j->tag, sizeof j->tag))
+            j->ok = 1;
+        else
+            StringCchCopyW(j->err, 256, L"GitHub ответил неожиданным адресом");
+    }
+    PostMessageW(j->hwnd, WM_APP_UPD_DONE, 0, (LPARAM)j);
+    return 0;
+}
+
+static void upd_start(HWND hwnd, int manual)
+{
+    upd_job *j;
+    HANDLE   th;
+
+    if (g_upd_busy) return;
+    j = (upd_job *)calloc(1, sizeof *j);
+    if (!j) return;
+    j->hwnd   = hwnd;
+    j->manual = manual;
+    th = CreateThread(NULL, 0, upd_thread, j, 0, NULL);
+    if (!th) { free(j); return; }
+    CloseHandle(th);
+    g_upd_busy = 1;
+    EnableWindow(g_set_upd_now, FALSE);
+}
+
+static void upd_prompt(HWND hwnd)
+{
+    wchar_t text[256], tag[32];
+
+    /* The tag passed update_tag_from_location: ASCII only. */
+    MultiByteToWideChar(CP_UTF8, 0, g_upd_tag, -1, tag, 32);
+    StringCchPrintfW(text, 256, L"Вышла новая версия Utgard: %s (у вас %s).\r\n\r\n"
+                                L"Открыть страницу загрузки?",
+                     tag, UTGARD_VERSION_W);
+    if (MessageBoxW(hwnd, text, L"Utgard", MB_ICONINFORMATION | MB_YESNO) != IDYES) return;
+    if (!shell_open_unelevated(UTGARD_RELEASES_URL))
+        MessageBoxW(hwnd, L"Не удалось открыть браузер. Скачайте новую версию здесь "
+                          L"(Ctrl+C копирует этот текст):\r\n\r\n" UTGARD_RELEASES_URL,
+                    L"Utgard", MB_ICONINFORMATION | MB_OK);
+}
+
+static void upd_done(HWND hwnd, upd_job *j)
+{
+    g_upd_busy = 0;
+    EnableWindow(g_set_upd_now, TRUE);
+
+    if (!j->ok) {
+        if (j->manual) problem(hwnd, j->err[0] ? j->err : L"Не удалось проверить обновления");
+    } else if (update_is_newer(j->tag, UTGARD_VERSION)) {
+        StringCchCopyA(g_upd_tag, sizeof g_upd_tag, j->tag);
+        if (j->manual || IsWindowVisible(hwnd)) upd_prompt(hwnd);
+        else g_upd_pending = 1;
+    } else if (j->manual) {
+        MessageBoxW(hwnd, L"У вас последняя версия (" UTGARD_VERSION_W L").",
+                    L"Utgard", MB_ICONINFORMATION | MB_OK);
+    }
+    free(j);
 }
 
 static void window_show(HWND hwnd)
 {
     ShowWindow(hwnd, IsIconic(hwnd) ? SW_RESTORE : SW_SHOW);
     SetForegroundWindow(hwnd);
+    if (g_upd_pending) { g_upd_pending = 0; upd_prompt(hwnd); }
 }
 
 static void act_vpn(HWND hwnd);
@@ -3218,6 +3335,8 @@ static void set_fonts(void)
     SendMessageW(g_set_stack,  WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_set_dns,    WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_set_tray,   WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_set_auto,   WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_set_upd,    WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_set_sub,    WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_set_back,   WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_set_save,   WM_SETFONT, (WPARAM)g_font, TRUE);
@@ -3343,6 +3462,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
             g_set_tray = make_button(hwnd, L"Сворачивать в трей при закрытии",
                                      ID_SET_TRAY, BK_CHECK);
+            g_set_auto = make_button(hwnd, L"Запускать вместе с Windows (свёрнутым в трей)",
+                                     ID_SET_AUTO, BK_CHECK);
+            g_set_upd  = make_button(hwnd, L"Проверять обновления при запуске",
+                                     ID_SET_UPD, BK_CHECK);
+            g_set_upd_now = make_button(hwnd, L"Проверить обновления", ID_SET_UPD_NOW,
+                                        BK_SECONDARY);
 
             g_set_back = make_button_on(hwnd, L"Назад", ID_SET_BACK, BK_SECONDARY, CLR_FOOTER);
             g_set_save = make_button_on(hwnd, L"Сохранить", ID_SET_SAVE, BK_PRIMARY, CLR_FOOTER);
@@ -3515,12 +3640,22 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         singbox_seed_config();
         g_taskbar_created = RegisterWindowMessageW(L"TaskbarCreated");
+        /* We run elevated, Explorer does not: UIPI drops its messages above
+           WM_USER. Without these, an autostart that beats the taskbar leaves
+           no icon at all, and the icon may not answer clicks. */
+        ChangeWindowMessageFilterEx(hwnd, g_taskbar_created, MSGFLT_ALLOW, NULL);
+        ChangeWindowMessageFilterEx(hwnd, WM_APP_TRAY, MSGFLT_ALLOW, NULL);
         tray_init(hwnd, WM_APP_TRAY, CLR_OK, CLR_MUTED);
         PostMessageW(hwnd, WM_APP_EXC_START, 0, 0);
         SetTimer(hwnd, TIMER_SUB, 60 * 1000, NULL);
         vpn_refresh();
         lists_refresh_counts();
         ping_start(hwnd);
+        {
+            app_settings st;
+            settings_load(&st);
+            if (st.update_check) upd_start(hwnd, 0);
+        }
     exc_check_start(hwnd);
         /* Ask after the window is up, not before: a message box over nothing
            is a poor first impression. */
@@ -3557,11 +3692,17 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case ID_PING_NOW:
             if (!g_ping_busy) ping_start(hwnd);
             return 0;
+        case ID_SET_UPD_NOW: upd_start(hwnd, 1); return 0;
         case ID_SET_TRAY:
-            if (GetPropW(g_set_tray, L"utgard.checked")) RemovePropW(g_set_tray, L"utgard.checked");
-            else SetPropW(g_set_tray, L"utgard.checked", (HANDLE)1);
-            InvalidateRect(g_set_tray, NULL, FALSE);
+        case ID_SET_AUTO:
+        case ID_SET_UPD: {
+            HWND box = (LOWORD(wp) == ID_SET_TRAY) ? g_set_tray
+                     : (LOWORD(wp) == ID_SET_AUTO) ? g_set_auto : g_set_upd;
+            if (GetPropW(box, L"utgard.checked")) RemovePropW(box, L"utgard.checked");
+            else SetPropW(box, L"utgard.checked", (HANDLE)1);
+            InvalidateRect(box, NULL, FALSE);
             return 0;
+        }
         case ID_SET_BACK: g_page = PAGE_UTGARD; layout(hwnd); return 0;
         case ID_SET_SAVE: set_save(hwnd); return 0;
 
@@ -3732,6 +3873,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         exc_check_start(hwnd);
         sub_auto_check(hwnd);        /* due already if the PC was off a while */
         return 0;
+
+    case WM_APP_UPD_DONE: upd_done(hwnd, (upd_job *)lp); return 0;
 
     case WM_APP_EXC_DONE: {
         exc_job *job = (exc_job *)lp;
