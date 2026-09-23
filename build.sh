@@ -14,7 +14,7 @@
 
 set -e
 
-SRC="src/main.c src/zapret.c src/link.c src/profiles.c src/ask.c src/net.c src/genconf.c src/singbox.c src/lists.c src/zapret_exclude.c src/apps.c src/pick.c src/settings.c src/tray.c src/fileio.c src/autostart.c src/update.c src/shellopen.c vendor/parson/parson.c"
+SRC="src/main.c src/ui_common.c src/ui_draw.c src/ui_layout.c src/ui_paint.c src/ui_vpn.c src/ui_zapret.c src/ui_lists.c src/ui_settings.c src/zapret.c src/link.c src/profiles.c src/ask.c src/net.c src/genconf.c src/singbox.c src/lists.c src/zapret_exclude.c src/apps.c src/pick.c src/settings.c src/tray.c src/fileio.c src/autostart.c src/update.c src/shellopen.c vendor/parson/parson.c"
 RC="res/utgard.rc"
 # The executable ships in bin\, and the client treats bin\'s parent as the
 # product root. Building anywhere else would give development a different
@@ -81,7 +81,7 @@ rm -f build/.probe.c build/.probe.exe
 
 # ---- flags -----------------------------------------------------------
 
-WARN="-std=c11 -Wall -Wextra -Werror"
+WARN="-std=c11 -Wall -Wextra -Wmissing-declarations -Werror"
 # Stack canaries on functions with local arrays or taken addresses. ASLR,
 # DEP and high-entropy ASLR are already on: modern binutils sets them by
 # default for PE, and the check at the end of this script confirms it.
@@ -117,7 +117,7 @@ rm -f build/.probe.c build/.probe.o
 # ---- build -----------------------------------------------------------
 
 MISSING=""
-for f in $SRC src/zapret.h src/link.h src/profiles.h src/ask.h src/net.h src/lists.h src/genconf.h src/singbox.h src/autostart.h src/update.h src/shellopen.h src/version.h res/utgard.rc res/utgard.manifest res/utgard.ico; do
+for f in $SRC src/zapret.h src/link.h src/profiles.h src/ask.h src/net.h src/lists.h src/genconf.h src/singbox.h src/ui.h src/autostart.h src/update.h src/shellopen.h src/version.h res/utgard.rc res/utgard.manifest res/utgard.ico licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt; do
     [ -f "$f" ] || MISSING="$MISSING $f"
 done
 if [ -n "$MISSING" ]; then
@@ -167,7 +167,12 @@ else
     CHECKED="не проверен — нет $OBJDUMP"
 fi
 
+# The exe carries Parson, whose MIT notice must travel with every copy.
+mkdir -p bin/licenses
+cp licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt bin/licenses/
+
 echo "Собрано: $OUT"
+echo "  лицензии:   bin/licenses/"
 echo "  компилятор: $CC ($TARGET)"
 echo "  экзешник:   $CHECKED"
 echo "  сборка:     $MODE_NAME"

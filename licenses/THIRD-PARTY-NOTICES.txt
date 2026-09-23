@@ -1,0 +1,19 @@
+Utgard - third-party components
+===============================
+
+Parson 1.5.4
+  Compiled into utgard.exe.
+  License: MIT - full text in PARSON-MIT.txt.
+  Source: https://github.com/kgabis/parson
+
+sing-box 1.14.1
+  NOT included in the Utgard archive. On first start Utgard offers to
+  download the official release from
+  https://github.com/SagerNet/sing-box/releases/tag/v1.14.1
+  and verifies it against SHA-256 checksums built into utgard.exe.
+  sing-box runs as a separate program; it is not linked into utgard.exe.
+  License: GPL-3.0-or-later. The LICENSE file from the official archive is
+  unpacked next to sing-box.exe in the sing-box folder.
+  Source: https://github.com/SagerNet/sing-box/tree/v1.14.1
+  libcronet.dll arrives in the same official archive; Utgard does not
+  redistribute it.
