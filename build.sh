@@ -117,7 +117,7 @@ rm -f build/.probe.c build/.probe.o
 # ---- build -----------------------------------------------------------
 
 MISSING=""
-for f in $SRC src/zapret.h src/link.h src/profiles.h src/ask.h src/net.h src/lists.h src/genconf.h src/singbox.h src/ui.h src/autostart.h src/update.h src/shellopen.h src/version.h res/utgard.rc res/utgard.manifest res/utgard.ico licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt; do
+for f in $SRC src/zapret.h src/link.h src/profiles.h src/ask.h src/net.h src/lists.h src/genconf.h src/singbox.h src/ui.h src/autostart.h src/update.h src/shellopen.h src/version.h res/utgard.rc res/utgard.manifest res/utgard.ico res/utgard-tray-off.ico res/utgard-tray-on.ico licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt; do
     [ -f "$f" ] || MISSING="$MISSING $f"
 done
 if [ -n "$MISSING" ]; then

@@ -5,3 +5,5 @@
 
 /* The lowest icon ID is the one Explorer shows for the executable. */
 1 ICON "utgard.ico"
+2 ICON "utgard-tray-off.ico"
+3 ICON "utgard-tray-on.ico"
