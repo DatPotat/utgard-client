@@ -1,5 +1,6 @@
 #include "tray.h"
 
+#include <commctrl.h>
 #include <shellapi.h>
 #include <strsafe.h>
 
@@ -7,60 +8,27 @@ static NOTIFYICONDATAW g_nid;
 static HICON           g_icon_on, g_icon_off;
 static int             g_state = -1;
 
-/* A filled disc in the given colour. Drawn at runtime: the executable carries
-   no icon resource, and two plain states are all the tray needs. */
-static HICON make_disc(COLORREF color)
+/* Resource ids from res/utgard.rc. Icon 1 stays the program icon: Explorer
+   shows the lowest-numbered one for the file. */
+#define IDI_TRAY_OFF 2
+#define IDI_TRAY_ON  3
+
+/* LIM_SMALL is the small-icon metric for the current DPI - the size the
+   notification area draws - picked from the sizes inside the .ico. */
+static HICON load_icon(int id)
 {
-    int      size = GetSystemMetrics(SM_CXSMICON);
-    HDC      screen = GetDC(NULL);
-    HDC      dc = CreateCompatibleDC(screen);
-    HBITMAP  color_bmp = CreateCompatibleBitmap(screen, size, size);
-    HBITMAP  mask_bmp  = CreateBitmap(size, size, 1, 1, NULL);
-    HGDIOBJ  old;
-    HBRUSH   br;
-    HPEN     pen;
-    ICONINFO ii;
-    HICON    icon;
-    RECT     all = { 0, 0, size, size };
-    int      m = size / 8;
+    HINSTANCE inst = GetModuleHandleW(NULL);
+    HICON     icon = NULL;
 
-    /* Colour plane: black outside, the disc inside. */
-    old = SelectObject(dc, color_bmp);
-    FillRect(dc, &all, (HBRUSH)GetStockObject(BLACK_BRUSH));
-    br  = CreateSolidBrush(color);
-    pen = CreatePen(PS_SOLID, 1, color);
-    SelectObject(dc, br);
-    SelectObject(dc, pen);
-    Ellipse(dc, m, m, size - m, size - m);
-    SelectObject(dc, old);
-    DeleteObject(br);
-    DeleteObject(pen);
-
-    /* Mask plane: white is transparent, black is where the colour shows. */
-    old = SelectObject(dc, mask_bmp);
-    FillRect(dc, &all, (HBRUSH)GetStockObject(WHITE_BRUSH));
-    SelectObject(dc, GetStockObject(BLACK_BRUSH));
-    SelectObject(dc, GetStockObject(BLACK_PEN));
-    Ellipse(dc, m, m, size - m, size - m);
-    SelectObject(dc, old);
-
-    ZeroMemory(&ii, sizeof ii);
-    ii.fIcon    = TRUE;
-    ii.hbmColor = color_bmp;
-    ii.hbmMask  = mask_bmp;
-    icon = CreateIconIndirect(&ii);
-
-    DeleteObject(color_bmp);
-    DeleteObject(mask_bmp);
-    DeleteDC(dc);
-    ReleaseDC(NULL, screen);
+    if (FAILED(LoadIconMetric(inst, MAKEINTRESOURCEW(id), LIM_SMALL, &icon)))
+        LoadIconMetric(inst, MAKEINTRESOURCEW(1), LIM_SMALL, &icon);
     return icon;
 }
 
-int tray_init(HWND owner, UINT callback_message, COLORREF on, COLORREF off)
+int tray_init(HWND owner, UINT callback_message)
 {
-    g_icon_on  = make_disc(on);
-    g_icon_off = make_disc(off);
+    g_icon_on  = load_icon(IDI_TRAY_ON);
+    g_icon_off = load_icon(IDI_TRAY_OFF);
 
     ZeroMemory(&g_nid, sizeof g_nid);
     g_nid.cbSize           = sizeof g_nid;

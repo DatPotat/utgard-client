@@ -522,7 +522,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
            no icon at all, and the icon may not answer clicks. */
         ChangeWindowMessageFilterEx(hwnd, g_taskbar_created, MSGFLT_ALLOW, NULL);
         ChangeWindowMessageFilterEx(hwnd, WM_APP_TRAY, MSGFLT_ALLOW, NULL);
-        tray_init(hwnd, WM_APP_TRAY, CLR_OK, CLR_MUTED);
+        tray_init(hwnd, WM_APP_TRAY);
         PostMessageW(hwnd, WM_APP_EXC_START, 0, 0);
         SetTimer(hwnd, TIMER_SUB, 60 * 1000, NULL);
         vpn_refresh();
