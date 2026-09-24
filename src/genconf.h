@@ -3,7 +3,7 @@
 
 #include "profiles.h"
 
-/* Builds sing-box/config.generated.json out of three inputs:
+/* Builds the config sing-box runs with out of three inputs:
 
      - the user's base config, read and never written back;
      - the enabled overlay files, also read-only;
@@ -19,7 +19,6 @@
 
 typedef struct {
     const char  *base_path;      /* sing-box/config.json */
-    const char  *out_path;       /* sing-box/config.generated.json */
     const char **overlays;       /* enabled overlay files, in order */
     int          overlay_count;
     const char  *rule_set_path;  /* e.g. "lists/general.srs", as sing-box sees it */
@@ -30,8 +29,12 @@ typedef struct {
     const profile_store *store;
 } genconf_input;
 
-/* 1 on success. On failure err holds a message meant for the user. */
-int genconf_build(const genconf_input *in, char *err, size_t errcap);
+/* 1 on success, with the config in *out_text. It carries the server
+   credentials, so it is never written to disk: it goes to sing-box through
+   stdin, and genconf_text_free wipes it. On failure err holds a message
+   meant for the user and *out_text is NULL. */
+int  genconf_build(const genconf_input *in, char **out_text, char *err, size_t errcap);
+void genconf_text_free(char *text);
 
 /* The tag a profile gets in the generated config. Exposed so the UI can say
    which outbound is active without guessing. */

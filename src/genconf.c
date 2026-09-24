@@ -52,15 +52,14 @@ static JSON_Value *parse_utf8_file(const char *path)
     return v;
 }
 
-static int write_utf8_file(const char *path, const char *text)
+void genconf_text_free(char *text)
 {
-    FILE  *f = open_utf8(path, "wb");
-    size_t len = strlen(text);
-    size_t put;
+    /* volatile: a plain memset before free is dead code the optimiser drops */
+    volatile char *p = text;
 
-    if (!f) return 0;
-    put = fwrite(text, 1, len, f);
-    return fclose(f) == 0 && put == len;
+    if (!text) return;
+    while (*p) *p++ = 0;
+    json_free_serialized_string(text);
 }
 
 #define SELECTOR_TAG  "utgard"
@@ -528,7 +527,7 @@ static int merge_dns_servers(JSON_Object *dns, JSON_Value **ovl, int n,
 
 /* ---- the build ------------------------------------------------------ */
 
-int genconf_build(const genconf_input *in, char *err, size_t errcap)
+int genconf_build(const genconf_input *in, char **out_text, char *err, size_t errcap)
 {
     JSON_Value  *root = NULL;
     JSON_Object *ro;
@@ -543,7 +542,8 @@ int genconf_build(const genconf_input *in, char *err, size_t errcap)
     int          i, active_ok = 0;
     char         active_tag[80] = { 0 };
 
-    if (!in || !in->base_path || !in->out_path || !in->store)
+    if (out_text) *out_text = NULL;
+    if (!in || !in->base_path || !out_text || !in->store)
         return oops(err, errcap, "Генератору не переданы обязательные пути");
     s = in->store;
     if (s->count <= 0)
@@ -874,16 +874,8 @@ int genconf_build(const genconf_input *in, char *err, size_t errcap)
         ro   = co;
     }
 
-    {
-        char *text = json_serialize_to_string_pretty(root);
-        int   ok   = text ? write_utf8_file(in->out_path, text) : 0;
-        if (text) json_free_serialized_string(text);
-        if (!ok) {
-            json_value_free(root);
-            return oops(err, errcap, "Не удалось записать config.generated.json");
-        }
-    }
-
+    *out_text = json_serialize_to_string(root);
     json_value_free(root);
+    if (!*out_text) return oops(err, errcap, "Не хватило памяти для конфигурации");
     return 1;
 }

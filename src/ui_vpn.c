@@ -339,7 +339,7 @@ int vpn_refresh(void)
    enabled application files, the settings, and the profiles themselves. The
    profiles carry credentials, so the job wipes this block before freeing it. */
 typedef struct {
-    char          base[1024], out[1024];
+    char          base[1024];
     char          overlay[32][MAX_PATH * 2];
     const char   *overlay_ptr[32];
     profile_store store;
@@ -350,13 +350,15 @@ static void work_vpn_on(long_job *j)
 {
     vpn_inputs *v = (vpn_inputs *)j->extra;
     char        err[256] = { 0 };
+    char       *config = NULL;
 
-    if (!genconf_build(&v->in, err, sizeof err)) {
+    if (!genconf_build(&v->in, &config, err, sizeof err)) {
         to_wide(err, j->msg, SB_MSG_MAX);
         return;
     }
-    if (!singbox_check(j->msg, SB_MSG_MAX)) return;
-    j->ok = singbox_start(j->msg, SB_MSG_MAX);
+    if (singbox_check(config, j->msg, SB_MSG_MAX))
+        j->ok = singbox_start(config, j->msg, SB_MSG_MAX);
+    genconf_text_free(config);
 }
 
 static void work_vpn_off(long_job *j)
@@ -418,8 +420,7 @@ void act_vpn(HWND hwnd)
     j->extra      = v;
     j->extra_size = sizeof *v;
 
-    if (!singbox_base_utf8(v->base, sizeof v->base) ||
-        !singbox_generated_utf8(v->out, sizeof v->out)) {
+    if (!singbox_base_utf8(v->base, sizeof v->base)) {
         job_free(j);
         problem(hwnd, L"Не удалось определить пути к конфигурации");
         return;
@@ -457,7 +458,6 @@ void act_vpn(HWND hwnd)
     settings_load(&g_set);
 
     v->in.base_path     = v->base;
-    v->in.out_path      = v->out;
     v->in.rule_set_path = "list/general.srs";
     v->in.mtu           = g_set.mtu;
     v->in.log_level     = settings_log_levels[g_set.log_level];
