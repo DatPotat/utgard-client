@@ -30,7 +30,8 @@ static int same_profile(const link_profile *a, const link_profile *b)
     return a->proto == b->proto && a->port == b->port &&
            strcmp(a->server, b->server) == 0 &&
            strcmp(a->uuid, b->uuid) == 0 &&
-           strcmp(a->password, b->password) == 0;
+           strcmp(a->password, b->password) == 0 &&
+           strcmp(a->wg_private_key, b->wg_private_key) == 0;
 }
 
 static int profile_duplicate(const link_profile *l)
@@ -85,7 +86,8 @@ void ping_start(HWND hwnd)
     for (i = 0; i < g_prof.count; i++) {
         StringCchCopyA(job->target[i].server, 256, g_prof.items[i].link.server);
         job->target[i].port = g_prof.items[i].link.port;
-        job->target[i].icmp = (g_prof.items[i].link.proto == LINK_HY2);
+        job->target[i].icmp = (g_prof.items[i].link.proto == LINK_HY2 ||
+                               g_prof.items[i].link.proto == LINK_WG);   /* UDP */
     }
 
     th = CreateThread(NULL, 0, ping_thread, job, 0, NULL);
@@ -466,7 +468,32 @@ void act_vpn(HWND hwnd)
     job_start(hwnd, L"проверяю конфигурацию и запускаю sing-box…", j);
 }
 
-void act_profile_add(HWND hwnd)
+static void profile_add_parsed(HWND hwnd, const link_profile *parsed)
+{
+    if (g_prof.count >= PROFILES_MAX) {
+        problem(hwnd, L"Больше профилей не помещается");
+        return;
+    }
+    if (profile_duplicate(parsed) >= 0) {
+        problem(hwnd, L"Такой профиль уже есть в списке");
+        return;
+    }
+
+    memset(&g_prof.items[g_prof.count], 0, sizeof g_prof.items[0]);
+    g_prof.items[g_prof.count].link = *parsed;
+    if (g_prof.active < 0) g_prof.active = g_prof.count;
+    g_prof.count++;
+
+    if (!profiles_save(&g_prof))
+        problem(hwnd, L"Профиль добавлен, но сохранить его не удалось");
+
+    profiles_reload();
+    ping_start(hwnd);
+    exc_check_start(hwnd);
+    layout(hwnd);
+}
+
+static void profile_add_link(HWND hwnd)
 {
     wchar_t      wide[2048];
     char         utf8[2048];
@@ -475,7 +502,7 @@ void act_profile_add(HWND hwnd)
     wchar_t      msg[320];
 
     if (!ask_string(hwnd, L"Добавить профиль",
-                    L"Вставьте ссылку vless://, hysteria2://, ss:// или trojan://",
+                    L"Ссылка vless, vmess, hysteria2, ss, trojan или wireguard",
                     NULL, wide, 2048))
         return;
 
@@ -490,28 +517,86 @@ void act_profile_add(HWND hwnd)
         problem(hwnd, msg);
         return;
     }
+    profile_add_parsed(hwnd, &parsed);
+}
 
-    if (g_prof.count >= PROFILES_MAX) {
-        problem(hwnd, L"Больше профилей не помещается");
+static int pick_conf(HWND owner, wchar_t *out, size_t cap)
+{
+    static const COMDLG_FILTERSPEC types[] = {
+        { L"Конфигурация WireGuard (*.conf)", L"*.conf" },
+        { L"Все файлы", L"*.*" }
+    };
+    IFileDialog *fd   = NULL;
+    IShellItem  *item = NULL;
+    PWSTR        wide = NULL;
+    int          ok   = 0;
+
+    if (FAILED(CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER,
+                                &IID_IFileDialog, (void **)&fd)))
+        return 0;
+    IFileDialog_SetFileTypes(fd, 2, types);
+    IFileDialog_SetTitle(fd, L"Файл WireGuard");
+    if (SUCCEEDED(IFileDialog_Show(fd, owner)) &&
+        SUCCEEDED(IFileDialog_GetResult(fd, &item)) &&
+        SUCCEEDED(IShellItem_GetDisplayName(item, SIGDN_FILESYSPATH, &wide)))
+        ok = SUCCEEDED(StringCchCopyW(out, cap, wide));
+    if (wide) CoTaskMemFree(wide);
+    if (item) IShellItem_Release(item);
+    IFileDialog_Release(fd);
+    return ok;
+}
+
+/* wg-quick configuration: the file name, without .conf, names the profile. */
+static void profile_add_wgconf(HWND hwnd)
+{
+    wchar_t       path[MAX_PATH], name[MAX_PATH], msg[320];
+    static char   text[65536];
+    size_t        got = 0;
+    char          err[256];
+    link_profile  parsed;
+    const wchar_t *base, *dot;
+
+    if (!pick_conf(hwnd, path, MAX_PATH)) return;
+    if (!file_read(path, text, sizeof text - 1, &got)) {
+        problem(hwnd, L"Не удалось прочитать файл (или он больше 64 КБ)");
         return;
     }
-    if (profile_duplicate(&parsed) >= 0) {
-        problem(hwnd, L"Такой профиль уже есть в списке");
+    text[got] = '\0';
+
+    if (!link_parse_wgconf(text, got, &parsed, err, sizeof err)) {
+        to_wide(err, msg, 320);
+        problem(hwnd, msg);
         return;
     }
 
-    memset(&g_prof.items[g_prof.count], 0, sizeof g_prof.items[0]);
-    g_prof.items[g_prof.count].link = parsed;
-    if (g_prof.active < 0) g_prof.active = g_prof.count;
-    g_prof.count++;
+    base = wcsrchr(path, L'\\');
+    base = base ? base + 1 : path;
+    StringCchCopyW(name, MAX_PATH, base);
+    dot = wcsrchr(name, L'.');
+    if (dot) name[dot - name] = L'\0';
+    if (!WideCharToMultiByte(CP_UTF8, 0, name, -1, parsed.name, (int)sizeof parsed.name,
+                             NULL, NULL))
+        parsed.name[0] = '\0';
 
-    if (!profiles_save(&g_prof))
-        problem(hwnd, L"Профиль добавлен, но сохранить его не удалось");
+    profile_add_parsed(hwnd, &parsed);
+}
 
-    profiles_reload();
-    ping_start(hwnd);
-    exc_check_start(hwnd);
-    layout(hwnd);
+void act_profile_add(HWND hwnd)
+{
+    HMENU menu = CreatePopupMenu();
+    RECT  r;
+    int   cmd;
+
+    if (!menu) return;
+    AppendMenuW(menu, MF_STRING, 1, L"Вставить ссылку…");
+    AppendMenuW(menu, MF_STRING, 2, L"Файл WireGuard (.conf)…");
+    GetWindowRect(g_prof_add, &r);
+    cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_BOTTOMALIGN,
+                         r.left, r.top, 0, hwnd, NULL);
+    DestroyMenu(menu);
+
+    if (cmd == 1) profile_add_link(hwnd);
+    else if (cmd == 2) profile_add_wgconf(hwnd);
 }
 
 void act_profile_delete(HWND hwnd)

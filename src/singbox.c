@@ -73,17 +73,19 @@ int singbox_generated_utf8(char *out, size_t cap)
 
 /* ---- is it running -------------------------------------------------- */
 
-static DWORD find_pid(void)
+/* Our sing-box, opened with the rights asked for, or NULL. The handle that
+   matched the path is the one returned, so it cannot be a reused PID. */
+static HANDLE open_ours(DWORD access)
 {
     wchar_t         want[MAX_PATH * 2];
     PROCESSENTRY32W pe;
     HANDLE          snap;
-    DWORD           found = 0;
+    HANDLE          found = NULL;
 
-    if (!singbox_exe(want, MAX_PATH * 2)) return 0;
+    if (!singbox_exe(want, MAX_PATH * 2)) return NULL;
 
     snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return 0;
+    if (snap == INVALID_HANDLE_VALUE) return NULL;
 
     pe.dwSize = sizeof pe;
     if (Process32FirstW(snap, &pe)) {
@@ -94,15 +96,17 @@ static DWORD find_pid(void)
 
             if (_wcsicmp(pe.szExeFile, L"sing-box.exe") != 0) continue;
 
-            h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+            h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | access, FALSE,
+                            pe.th32ProcessID);
             if (!h) continue;
             /* Name alone is not enough: another sing-box on this machine is
                not ours to stop. */
             if (QueryFullProcessImageNameW(h, 0, path, &len) &&
-                _wcsicmp(path, want) == 0)
-                found = pe.th32ProcessID;
+                _wcsicmp(path, want) == 0) {
+                found = h;
+                break;
+            }
             CloseHandle(h);
-            if (found) break;
         } while (Process32NextW(snap, &pe));
     }
 
@@ -110,7 +114,13 @@ static DWORD find_pid(void)
     return found;
 }
 
-int singbox_running(void) { return find_pid() != 0; }
+int singbox_running(void)
+{
+    HANDLE h = open_ours(0);
+    if (!h) return 0;
+    CloseHandle(h);
+    return 1;
+}
 
 /* The base config the user owns. Written once, when it is missing, so a bare
    executable dropped into an empty folder has something to start from. It is
@@ -796,41 +806,51 @@ static BOOL CALLBACK close_cb(HWND hwnd, LPARAM lp)
     return TRUE;
 }
 
+/* sing-box 1.14.1 gives its own shutdown C.FatalStopTimeout (10 s) before
+   it gives up; ours must be longer, or we kill it while it is still
+   removing the TUN adapter. */
+#define STOP_WAIT_MS 12000
+
+/* Returns 1 once the process is gone, 0 if it is still running. A clean stop
+   leaves msg empty; anything else - a non-zero exit code, a forced kill -
+   is put in msg, because the TUN adapter may be left behind and the next
+   start can fail on it. */
 int singbox_stop(wchar_t *msg, size_t cap)
 {
     close_hunt h;
-    DWORD      pid;
-    int        i;
+    HANDLE     p;
+    DWORD      code = 0;
 
     if (msg && cap) msg[0] = L'\0';
 
-    pid = find_pid();
-    if (!pid) return 1;
+    p = open_ours(SYNCHRONIZE | PROCESS_TERMINATE);
+    if (!p)
+        return singbox_running() ? say(msg, cap, L"Нет доступа к процессу sing-box") : 1;
 
-    h.pid = pid;
+    h.pid = GetProcessId(p);
     h.posted = 0;
     EnumWindows(close_cb, (LPARAM)&h);
 
-    for (i = 0; i < 20; i++) {          /* up to 6 s, as the old client waited */
-        Sleep(300);
-        if (!singbox_running()) return 1;
+    /* sing-box exits 0 only after Close() returned: a SIGTERM-driven return
+       from run(). log.Fatal and a killed process give other codes. */
+    if (h.posted && WaitForSingleObject(p, STOP_WAIT_MS) == WAIT_OBJECT_0) {
+        if (GetExitCodeProcess(p, &code) && code != 0 && msg && cap)
+            StringCchPrintfW(msg, cap, L"sing-box завершился с ошибкой (код 0x%08lX) — "
+                                       L"смотрите журнал logs\\sing-box.log",
+                             (unsigned long)code);
+        CloseHandle(p);
+        return 1;
     }
 
-    {
-        HANDLE p = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
-        if (p) {
-            TerminateProcess(p, 1);
-            WaitForSingleObject(p, 3000);
-            CloseHandle(p);
-        }
-    }
-
-    if (singbox_running())
+    TerminateProcess(p, 1);
+    if (WaitForSingleObject(p, 5000) != WAIT_OBJECT_0) {
+        CloseHandle(p);
         return say(msg, cap, L"sing-box не завершился");
+    }
+    CloseHandle(p);
 
-    /* Killed rather than closed: say so, because the TUN adapter may be left
-       behind and the next start can fail on it. */
-    if (!h.posted)
-        say(msg, cap, L"sing-box пришлось завершить принудительно");
+    say(msg, cap, h.posted
+        ? L"sing-box не закрылся сам за 12 секунд, его пришлось завершить принудительно"
+        : L"У sing-box не найдено окно консоли, его пришлось завершить принудительно");
     return 1;
 }

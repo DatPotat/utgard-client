@@ -46,6 +46,8 @@
 #define CLR_ACCENT_HI RGB(0xFF, 0xE9, 0xA6)   /* accent, under the pointer */
 #define CLR_OK        RGB(0xBA, 0xD8, 0x9A)
 #define CLR_WARN      RGB(0xA8, 0x6B, 0x86)
+#define CLR_WARN_LO   RGB(0x8F, 0x5B, 0x72)   /* warn, pressed: as accent, x0.85 */
+#define CLR_WARN_HI   RGB(0xC5, 0x9B, 0xAE)   /* warn, under the pointer: 1/3 to white */
 /* ---- control ids ---------------------------------------------------- */
 
 #define ID_TAB_UTGARD 101

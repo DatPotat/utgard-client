@@ -16,9 +16,9 @@ set -e
 
 SRC="src/main.c src/ui_common.c src/ui_draw.c src/ui_layout.c src/ui_paint.c src/ui_vpn.c src/ui_zapret.c src/ui_lists.c src/ui_settings.c src/zapret.c src/link.c src/profiles.c src/ask.c src/net.c src/genconf.c src/singbox.c src/lists.c src/zapret_exclude.c src/apps.c src/pick.c src/settings.c src/tray.c src/fileio.c src/autostart.c src/update.c src/shellopen.c vendor/parson/parson.c"
 RC="res/utgard.rc"
-# The executable ships in bin\, and the client treats bin\'s parent as the
-# product root. Building anywhere else would give development a different
-# root than the real layout.
+# The client keeps everything beside its own executable (singbox_root), so
+# bin\ is the product folder in development too, and the release archive is
+# packed from it.
 OUT="bin/utgard.exe"
 RES="build/utgard.res"
 
