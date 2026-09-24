@@ -97,6 +97,10 @@ const wchar_t *g_busy_text;   /* what it is doing, for the status line */
 int  g_host_count, g_app_count;
 
 profile_store g_prof;
+/* Set by WM_CREATE, reported once the window exists: a message box inside
+   WM_CREATE would run a modal loop before the window is fully built. */
+static int     g_prof_unreadable;
+static wchar_t g_prof_aside[MAX_PATH * 2];
 
 HFONT g_font_mono;
 
@@ -371,7 +375,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         SendMessageW(g_plist, LB_SETITEMHEIGHT, 0, (LPARAM)S(34));
         SetWindowTheme(g_plist, L"DarkMode_Explorer", NULL);
         list_hover_attach(g_plist);
-        g_prof_add = make_button_on(hwnd, L"Добавить по ссылке…", ID_PROF_ADD,
+        g_prof_add = make_button_on(hwnd, L"Добавить профиль…", ID_PROF_ADD,
                                     BK_SECONDARY, CLR_FOOTER);
         g_prof_del = make_button_on(hwnd, L"Удалить", ID_PROF_DEL,
                                     BK_DANGER, CLR_FOOTER);
@@ -496,7 +500,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             if (zapret_path_load(remembered, ZAPRET_PATH_MAX))
                 zapret_scan(remembered, &g_zap);
         }
-        profiles_load(&g_prof);
+        if (!profiles_load(&g_prof, g_prof_aside, MAX_PATH * 2))
+            g_prof_unreadable = 1;
         profiles_reload();
         {
             static const wchar_t *dirs[] = { L"sing-box", L"list",
@@ -927,6 +932,27 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     if (cmdline && wcsstr(cmdline, L"--minimized")) show = SW_HIDE;
     ShowWindow(hwnd, show);
     UpdateWindow(hwnd);
+
+    if (g_prof_unreadable) {
+        wchar_t        msg[MAX_PATH * 2 + 512];
+        const wchar_t *name = wcsrchr(g_prof_aside, L'\\');
+
+        if (g_prof_aside[0])
+            StringCchPrintfW(msg, sizeof msg / sizeof msg[0],
+                L"Не удалось прочитать сохранённые профили: файл создан другой "
+                L"учётной записью Windows, на другом компьютере или более новой "
+                L"версией Utgard, либо повреждён.\n\n"
+                L"Файл не удалён: он переименован в %s рядом с utgard.exe. "
+                L"Список профилей начат заново.",
+                name ? name + 1 : g_prof_aside);
+        else
+            StringCchCopyW(msg, sizeof msg / sizeof msg[0],
+                L"Не удалось прочитать сохранённые профили (profiles.dat), и файл "
+                L"не получилось переименовать — возможно, он занят другой программой.\n\n"
+                L"Чтобы не перезаписать его, изменения профилей до перезапуска "
+                L"Utgard сохраняться не будут.");
+        problem(hwnd, msg);
+    }
 
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {
         if (!IsDialogMessageW(hwnd, &msg)) {

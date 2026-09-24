@@ -377,6 +377,8 @@ static const wchar_t *proto_label(link_proto p)
     case LINK_HY2:   return L"Hysteria2";
     case LINK_SS:    return L"Shadowsocks";
     case LINK_TROJAN: return L"Trojan";
+    case LINK_VMESS: return L"VMess";
+    case LINK_WG:    return L"WireGuard";
     default:         return L"?";
     }
 }

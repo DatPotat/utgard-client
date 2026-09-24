@@ -2,6 +2,9 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+
+#include "parson.h"
 
 /* ---- small bounded helpers ------------------------------------------ */
 
@@ -300,6 +303,332 @@ static int parse_transport(const char *query, size_t qlen, link_profile *out,
     return 1;
 }
 
+/* ---- vmess ---------------------------------------------------------- */
+
+/* Append key=value to a query string, percent-encoding the value, so the
+   VMess JSON can go through the same transport checks as a VLESS link. */
+static int q_add(char *q, size_t cap, const char *key, const char *val)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    size_t n = strlen(q);
+
+    if (!val || !val[0]) return 1;
+    if (n + strlen(key) + 2 >= cap) return 0;
+    if (n) q[n++] = '&';
+    memcpy(q + n, key, strlen(key)); n += strlen(key);
+    q[n++] = '=';
+    for (; *val; val++) {
+        unsigned char c = (unsigned char)*val;
+        int plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' ||
+                    c == '~' || c == '/' || c == ',';
+        if (n + 4 >= cap) return 0;
+        if (plain) q[n++] = (char)c;
+        else { q[n++] = '%'; q[n++] = hex[c >> 4]; q[n++] = hex[c & 15]; }
+    }
+    q[n] = '\0';
+    return 1;
+}
+
+/* Generators write port and aid either as numbers or as strings. */
+static void json_field(const JSON_Object *o, const char *key, char *dst, size_t cap)
+{
+    const JSON_Value *v = json_object_get_value(o, key);
+    dst[0] = '\0';
+    if (!v || cap == 0) return;
+    if (json_value_get_type(v) == JSONString) {
+        const char *sv = json_value_get_string(v);
+        size_t      n  = strlen(sv);
+        if (n < cap) memcpy(dst, sv, n + 1);
+    } else if (json_value_get_type(v) == JSONNumber) {
+        double d = json_value_get_number(v);
+        if (d >= 0 && d <= 1e9) snprintf(dst, cap, "%.0f", d);
+    }
+}
+
+/* vmess://base64(JSON), the v2rayN share format ("v": "2"): ps, add, port,
+   id, aid, scy, net, type, host, path, tls, sni, alpn, fp, insecure. For
+   grpc, path carries the service name. */
+static int parse_vmess(const char *b64, link_profile *out, char *err, size_t errcap)
+{
+    static const char *SECURITY[] = { "auto", "none", "zero", "aes-128-cfb",
+                                      "aes-128-gcm", "chacha20-poly1305" };
+    char        json[4096], f[512], net[32], q[2048];
+    long        n;
+    JSON_Value *root;
+    JSON_Object *o;
+    size_t      i;
+    int         ok = 0;
+
+    n = b64_decode(b64, strlen(b64), json, sizeof json - 1);
+    if (n <= 0) return oops(err, errcap, "ссылку vmess не удалось раскодировать");
+    json[n] = '\0';
+
+    root = json_parse_string(json);
+    o = json_value_get_object(root);
+    if (!o) { json_value_free(root); return oops(err, errcap, "ссылка vmess не содержит JSON"); }
+
+    json_field(o, "ps", f, sizeof f);
+    put(out->name, sizeof out->name, f, strlen(f));
+
+    json_field(o, "add", f, sizeof f);
+    if (!f[0] || !put(out->server, sizeof out->server, f, strlen(f)) || !valid_host(out->server)) {
+        oops(err, errcap, "в ссылке vmess неверный адрес сервера");
+        goto done;
+    }
+    json_field(o, "port", f, sizeof f);
+    if (!parse_port(f, strlen(f), &out->port)) {
+        oops(err, errcap, "в ссылке vmess неверный порт");
+        goto done;
+    }
+    json_field(o, "id", f, sizeof f);
+    if (!put(out->uuid, sizeof out->uuid, f, strlen(f)) || !valid_id(out->uuid)) {
+        oops(err, errcap, "в ссылке vmess нет идентификатора (id) или он повреждён");
+        goto done;
+    }
+    json_field(o, "aid", f, sizeof f);
+    out->alter_id = f[0] ? atoi(f) : 0;
+    if (out->alter_id < 0 || out->alter_id > 65535) out->alter_id = 0;
+
+    json_field(o, "scy", f, sizeof f);
+    lower(f);
+    if (!f[0]) strcpy(f, "auto");
+    for (i = 0; i < sizeof SECURITY / sizeof SECURITY[0]; i++)
+        if (str_eq(f, SECURITY[i])) break;
+    if (i == sizeof SECURITY / sizeof SECURITY[0]) {
+        oops(err, errcap, "шифрование vmess (scy) не поддерживается ядром sing-box");
+        goto done;
+    }
+    put(out->method, sizeof out->method, f, strlen(f));
+
+    /* The transport goes through the VLESS checks as a synthetic query. */
+    q[0] = '\0';
+    json_field(o, "net", net, sizeof net);
+    lower(net);
+    if (!q_add(q, sizeof q, "type", net)) goto toolong;
+    json_field(o, "type", f, sizeof f);
+    if (!str_eq(net, "grpc") && !q_add(q, sizeof q, "headerType", f)) goto toolong;
+    json_field(o, "host", f, sizeof f);
+    if (!q_add(q, sizeof q, "host", f)) goto toolong;
+    json_field(o, "path", f, sizeof f);
+    if (!q_add(q, sizeof q, str_eq(net, "grpc") ? "serviceName" : "path", f)) goto toolong;
+    json_field(o, "alpn", f, sizeof f);
+    if (!q_add(q, sizeof q, "alpn", f)) goto toolong;
+    if (!parse_transport(q, strlen(q), out, err, errcap)) goto done;
+
+    json_field(o, "tls", f, sizeof f);
+    lower(f);
+    if (str_eq(f, "reality")) {
+        oops(err, errcap, "vmess с reality не поддерживается — нужна vless-ссылка");
+        goto done;
+    }
+    out->tls = str_eq(f, "tls");
+    if (out->tls) {
+        json_field(o, "sni", f, sizeof f);
+        if (!f[0]) json_field(o, "host", f, sizeof f);
+        if (!f[0]) put(f, sizeof f, out->server, strlen(out->server));
+        put(out->sni, sizeof out->sni, f, strlen(f));
+        json_field(o, "fp", f, sizeof f);
+        if (f[0]) put(out->fingerprint, sizeof out->fingerprint, f, strlen(f));
+        json_field(o, "insecure", f, sizeof f);
+        out->insecure = str_eq(f, "1") || str_eq(f, "true");
+    } else {
+        out->alpn[0] = '\0';
+    }
+    ok = 1;
+    goto done;
+
+toolong:
+    oops(err, errcap, "в ссылке vmess слишком длинные параметры транспорта");
+done:
+    json_value_free(root);
+    return ok;
+}
+
+/* ---- wireguard ------------------------------------------------------ */
+
+/* Standard base64 of exactly 32 bytes: 44 characters ending in '='. */
+static int valid_wg_key(const char *k)
+{
+    char buf[48];
+    size_t i, n = strlen(k);
+    if (n != 44 || k[43] != '=') return 0;
+    for (i = 0; i < 43; i++) {
+        char c = k[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '+' || c == '/'))
+            return 0;
+    }
+    return b64_decode(k, n, buf, sizeof buf) == 32;
+}
+
+/* "10.0.0.2/32, fd00::2" -> "10.0.0.2/32,fd00::2/128". A bare address gets
+   its single-host prefix; anything but digits, hex, dots, colons and one
+   slash is refused. */
+static int wg_addresses(const char *in, char *out, size_t cap)
+{
+    size_t used = 0;
+    out[0] = '\0';
+
+    while (*in) {
+        char   tok[64];
+        size_t n = 0, i;
+        int    v6, slash = 0;
+        long   bits = -1;
+
+        while (*in == ',' || *in == ' ' || *in == '\t') in++;
+        if (!*in) break;
+        while (in[n] && in[n] != ',' && in[n] != ' ' && in[n] != '\t') n++;
+        if (n >= sizeof tok) return 0;
+        memcpy(tok, in, n);
+        tok[n] = '\0';
+        in += n;
+
+        for (i = 0; tok[i]; i++) {
+            char c = tok[i];
+            if (c == '/') { if (slash++) return 0; bits = strtol(tok + i + 1, NULL, 10); continue; }
+            if (slash) { if (c < '0' || c > '9') return 0; continue; }
+            if (!(hexval(c) >= 0 || c == '.' || c == ':')) return 0;
+        }
+        v6 = strchr(tok, ':') != NULL;
+        if (!v6 && !strchr(tok, '.')) return 0;
+        if (slash && (bits < 0 || bits > (v6 ? 128 : 32) || tok[strlen(tok) - 1] == '/')) return 0;
+
+        if (used + n + 6 >= cap) return 0;
+        if (used) out[used++] = ',';
+        memcpy(out + used, tok, n);
+        used += n;
+        if (!slash) {
+            const char *pfx = v6 ? "/128" : "/32";
+            memcpy(out + used, pfx, strlen(pfx));
+            used += strlen(pfx);
+        }
+        out[used] = '\0';
+    }
+    return used > 0;
+}
+
+/* Exactly three bytes, as Cloudflare's client id: "1,2,3". */
+static int wg_reserved(const char *in, char *out, size_t cap)
+{
+    long v[3];
+    int  k;
+    const char *p = in;
+    char *end;
+
+    for (k = 0; k < 3; k++) {
+        while (*p == ' ') p++;
+        v[k] = strtol(p, &end, 10);
+        if (end == p || v[k] < 0 || v[k] > 255) return 0;
+        p = end;
+        while (*p == ' ') p++;
+        if (k < 2) { if (*p != ',') return 0; p++; }
+    }
+    if (*p) return 0;
+    return snprintf(out, cap, "%ld,%ld,%ld", v[0], v[1], v[2]) < (int)cap;
+}
+
+/* Shared by the link and the .conf: everything filled, now check it. */
+static int wg_finish(link_profile *out, const char *address, const char *reserved,
+                     char *err, size_t errcap)
+{
+    if (!valid_wg_key(out->wg_private_key))
+        return oops(err, errcap, "закрытый ключ WireGuard повреждён — нужна строка base64 из 44 символов");
+    if (!valid_wg_key(out->wg_peer_key))
+        return oops(err, errcap, "открытый ключ сервера WireGuard отсутствует или повреждён");
+    if (out->wg_psk[0] && !valid_wg_key(out->wg_psk))
+        return oops(err, errcap, "общий ключ WireGuard (PresharedKey) повреждён");
+    if (!address[0] || !wg_addresses(address, out->wg_address, sizeof out->wg_address))
+        return oops(err, errcap, "не указан или неверен адрес интерфейса WireGuard (Address)");
+    if (reserved[0] && !wg_reserved(reserved, out->wg_reserved, sizeof out->wg_reserved))
+        return oops(err, errcap, "поле reserved WireGuard должно быть тремя числами 0-255 через запятую");
+    if (out->mtu && (out->mtu < 1280 || out->mtu > 1500))
+        return oops(err, errcap, "MTU WireGuard должен быть от 1280 до 1500");
+    if (out->keepalive < 0 || out->keepalive > 65535) out->keepalive = 0;
+    return 1;
+}
+
+static void trim(char *s)
+{
+    size_t n = strlen(s), i = 0;
+    while (n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\r')) s[--n] = '\0';
+    while (s[i] == ' ' || s[i] == '\t') i++;
+    if (i) memmove(s, s + i, n - i + 1);
+}
+
+static int key_is(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++) {
+        char x = *a, y = *b;
+        if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
+        if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
+        if (x != y) return 0;
+    }
+    return *a == *b;
+}
+
+int link_parse_wgconf(const char *text, size_t len, link_profile *out,
+                      char *err, size_t errcap)
+{
+    char        address[512] = "", endpoint[300] = "";
+    const char *p = text, *end = text + len;
+    int         section = 0, peers = 0;   /* 1 interface, 2 peer */
+
+    if (!text || !out) return oops(err, errcap, "пустой файл");
+    memset(out, 0, sizeof *out);
+    out->proto = LINK_WG;
+
+    while (p < end) {
+        const char *nl = memchr(p, '\n', (size_t)(end - p));
+        size_t      n  = (size_t)((nl ? nl : end) - p);
+        char        line[600], *eq, *val;
+
+        if (n < sizeof line) {
+            memcpy(line, p, n);
+            line[n] = '\0';
+            if ((eq = strchr(line, '#')) != NULL) *eq = '\0';
+            trim(line);
+            if (key_is(line, "[Interface]")) section = 1;
+            else if (key_is(line, "[Peer]")) { section = 2; peers++; }
+            else if (line[0] == '[') section = 0;
+            else if ((eq = strchr(line, '=')) != NULL && section && (section == 1 || peers == 1)) {
+                *eq = '\0';
+                val = eq + 1;
+                trim(line);
+                trim(val);
+                if (section == 1 && key_is(line, "PrivateKey"))
+                    put(out->wg_private_key, sizeof out->wg_private_key, val, strlen(val));
+                else if (section == 1 && key_is(line, "Address")) {
+                    size_t a = strlen(address);
+                    if (a + strlen(val) + 2 < sizeof address) {
+                        if (a) address[a++] = ',';
+                        memcpy(address + a, val, strlen(val) + 1);
+                    }
+                } else if (section == 1 && key_is(line, "MTU"))
+                    out->mtu = atoi(val);
+                else if (section == 2 && key_is(line, "PublicKey"))
+                    put(out->wg_peer_key, sizeof out->wg_peer_key, val, strlen(val));
+                else if (section == 2 && key_is(line, "PresharedKey"))
+                    put(out->wg_psk, sizeof out->wg_psk, val, strlen(val));
+                else if (section == 2 && key_is(line, "Endpoint"))
+                    put(endpoint, sizeof endpoint, val, strlen(val));
+                else if (section == 2 && key_is(line, "PersistentKeepalive"))
+                    out->keepalive = atoi(val);
+            }
+        }
+        if (!nl) break;
+        p = nl + 1;
+    }
+
+    if (!peers) return oops(err, errcap, "в файле нет раздела [Peer]");
+    out->port = 51820;
+    if (!endpoint[0] || !split_hostport(endpoint, strlen(endpoint), out->server,
+                                        sizeof out->server, &out->port) ||
+        !valid_host(out->server))
+        return oops(err, errcap, "в разделе [Peer] нет адреса сервера (Endpoint) или он неверен");
+    return wg_finish(out, address, "", err, errcap);
+}
+
 /* ---- shadowsocks ---------------------------------------------------- */
 
 static const char *SS_METHODS[] = {
@@ -381,7 +710,16 @@ int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
     else if (strncmp(uri, "hy2://", 6) == 0)        { out->proto = LINK_HY2;  body = uri + 6; }
     else if (strncmp(uri, "ss://", 5) == 0)         { out->proto = LINK_SS;   body = uri + 5; }
     else if (strncmp(uri, "trojan://", 9) == 0)     { out->proto = LINK_TROJAN; body = uri + 9; }
-    else return oops(err, errcap, "нужна ссылка vless://, hysteria2://, ss:// или trojan://");
+    else if (strncmp(uri, "vmess://", 8) == 0) {
+        char b64[4096];
+        size_t n = strlen(uri + 8);
+        out->proto = LINK_VMESS;
+        while (n && (uri[8 + n - 1] == ' ' || uri[8 + n - 1] == '\r' || uri[8 + n - 1] == '\n')) n--;
+        if (!put(b64, sizeof b64, uri + 8, n)) return oops(err, errcap, "слишком длинная ссылка vmess");
+        return parse_vmess(b64, out, err, errcap);
+    }
+    else if (strncmp(uri, "wireguard://", 12) == 0) { out->proto = LINK_WG; body = uri + 12; out->port = 51820; }
+    else return oops(err, errcap, "нужна ссылка vless://, vmess://, hysteria2://, ss://, trojan:// или wireguard://");
 
     len = strlen(body);
 
@@ -574,6 +912,22 @@ int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
         return 1;
     }
 
+    case LINK_WG: {
+        /* wireguard://<private key>@host:port?publickey=&presharedkey=&address=
+           &reserved=&mtu=, the v2rayN share format. */
+        char address[512], reserved[64];
+
+        if (!pct_decode(body, (size_t)(at - body), out->wg_private_key, sizeof out->wg_private_key))
+            return oops(err, errcap, "закрытый ключ WireGuard повреждён — нужна строка base64 из 44 символов");
+        query_get(query, qlen, "publickey", out->wg_peer_key, sizeof out->wg_peer_key);
+        query_get(query, qlen, "presharedkey", out->wg_psk, sizeof out->wg_psk);
+        query_get(query, qlen, "address", address, sizeof address);
+        query_get(query, qlen, "reserved", reserved, sizeof reserved);
+        query_get(query, qlen, "mtu", scratch, sizeof scratch);
+        out->mtu = scratch[0] ? atoi(scratch) : 0;
+        return wg_finish(out, address, reserved, err, errcap);
+    }
+
     default:
         return oops(err, errcap, "неизвестный тип ссылки");
     }
@@ -586,6 +940,8 @@ static int looks_like_links(const char *s, size_t len)
     size_t i;
     for (i = 0; i + 5 < len && i < 64; i++) {
         if (strncmp(s + i, "vless:", 6) == 0) return 1;
+        if (strncmp(s + i, "vmess:", 6) == 0) return 1;
+        if (i + 10 < len && strncmp(s + i, "wireguard:", 10) == 0) return 1;
         if (strncmp(s + i, "ss://", 5) == 0) return 1;
         if (i + 7 < len && strncmp(s + i, "trojan:", 7) == 0) return 1;
         if (i + 9 < len && strncmp(s + i, "hysteria2", 9) == 0) return 1;

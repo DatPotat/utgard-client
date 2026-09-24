@@ -293,6 +293,13 @@ static JSON_Value *make_outbound(const link_profile *p, const char *tag)
             json_object_set_string(ob, "password", p->obfs_password);
             json_object_set_value(o, "obfs", ov);
         }
+    } else if (p->proto == LINK_VMESS) {
+        json_object_set_string(o, "type", "vmess");
+        json_object_set_string(o, "uuid", p->uuid);
+        json_object_set_string(o, "security", p->method[0] ? p->method : "auto");
+        if (p->alter_id > 0) json_object_set_number(o, "alter_id", p->alter_id);
+        if (p->tls) json_object_set_value(o, "tls", tls_block(p));
+        if (p->transport[0]) json_object_set_value(o, "transport", transport_block(p));
     } else if (p->proto == LINK_SS) {
         json_object_set_string(o, "type", "shadowsocks");
         json_object_set_string(o, "method", p->method);
@@ -302,6 +309,63 @@ static JSON_Value *make_outbound(const link_profile *p, const char *tag)
         return NULL;
     }
 
+    return v;
+}
+
+/* WireGuard is an endpoint in sing-box, not an outbound, but its tag works
+   wherever an outbound tag does - in the selector too (checked by running
+   sing-box 1.14.1). The peer takes all traffic: what reaches it is decided
+   by our route rules, not by allowed_ips. */
+static void append_list(JSON_Object *o, const char *key, const char *csv)
+{
+    JSON_Value *av = json_value_init_array();
+    const char *q = csv;
+    while (*q) {
+        char   one[64];
+        size_t n = strcspn(q, ",");
+        if (n && n < sizeof one) {
+            memcpy(one, q, n);
+            one[n] = '\0';
+            json_array_append_string(json_value_get_array(av), one);
+        }
+        q += n;
+        if (*q == ',') q++;
+    }
+    json_object_set_value(o, key, av);
+}
+
+static JSON_Value *make_endpoint(const link_profile *p, const char *tag)
+{
+    JSON_Value  *v  = json_value_init_object();
+    JSON_Object *o  = json_value_get_object(v);
+    JSON_Value  *pv = json_value_init_object();
+    JSON_Object *po = json_value_get_object(pv);
+    JSON_Value  *peers = json_value_init_array();
+
+    json_object_set_string(o, "type", "wireguard");
+    json_object_set_string(o, "tag", tag);
+    append_list(o, "address", p->wg_address);
+    json_object_set_string(o, "private_key", p->wg_private_key);
+    if (p->mtu > 0) json_object_set_number(o, "mtu", p->mtu);
+
+    json_object_set_string(po, "address", p->server);
+    json_object_set_number(po, "port", p->port);
+    json_object_set_string(po, "public_key", p->wg_peer_key);
+    if (p->wg_psk[0]) json_object_set_string(po, "pre_shared_key", p->wg_psk);
+    append_list(po, "allowed_ips", "0.0.0.0/0,::/0");
+    if (p->keepalive > 0) json_object_set_number(po, "persistent_keepalive_interval", p->keepalive);
+    if (p->wg_reserved[0]) {
+        JSON_Value *rv = json_value_init_array();
+        const char *q = p->wg_reserved;
+        while (*q) {
+            json_array_append_number(json_value_get_array(rv), strtol(q, NULL, 10));
+            q += strcspn(q, ",");
+            if (*q == ',') q++;
+        }
+        json_object_set_value(po, "reserved", rv);
+    }
+    json_array_append_value(json_value_get_array(peers), pv);
+    json_object_set_value(o, "peers", peers);
     return v;
 }
 
@@ -560,23 +624,35 @@ int genconf_build(const genconf_input *in, char *err, size_t errcap)
         json_array_append_value(oarr, dv);
     }
     {
-        JSON_Value *sel_list = json_value_init_array();
+        JSON_Value *sel_list  = json_value_init_array();
+        JSON_Value *endpoints = json_value_init_array();
 
         for (i = 0; i < s->count; i++) {
             char        tag[80];
             JSON_Value *ov;
 
             genconf_tag(s, i, tag, sizeof tag);
-            ov = make_outbound(&s->items[i].link, tag);
-            if (!ov) continue;                     /* unknown protocol: skip */
-
-            json_array_append_value(oarr, ov);
+            if (s->items[i].link.proto == LINK_WG) {
+                json_array_append_value(json_value_get_array(endpoints),
+                                        make_endpoint(&s->items[i].link, tag));
+            } else {
+                ov = make_outbound(&s->items[i].link, tag);
+                if (!ov) continue;                 /* unknown protocol: skip */
+                json_array_append_value(oarr, ov);
+            }
             json_array_append_string(json_value_get_array(sel_list), tag);
             if (i == s->active) {
                 snprintf(active_tag, sizeof active_tag, "%s", tag);
                 active_ok = 1;
             }
         }
+
+        /* Only ours: a user endpoint is dropped like a user outbound. */
+        json_object_remove(ro, "endpoints");
+        if (json_array_get_count(json_value_get_array(endpoints)))
+            json_object_set_value(ro, "endpoints", endpoints);
+        else
+            json_value_free(endpoints);
 
         if (!active_ok) {
             json_value_free(sel_list);
@@ -748,7 +824,7 @@ int genconf_build(const genconf_input *in, char *err, size_t errcap)
        future sing-box versions add are dropped without anyone having to know
        about them. */
     {
-        static const char *const keep[] = { "log", "dns", "inbounds", "outbounds", "route" };
+        static const char *const keep[] = { "log", "dns", "inbounds", "outbounds", "endpoints", "route" };
         JSON_Value  *clean  = json_value_init_object();
         JSON_Object *co     = json_value_get_object(clean);
         JSON_Object *oldlog = json_object_get_object(ro, "log");

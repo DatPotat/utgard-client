@@ -262,9 +262,12 @@ void draw_button(const DRAWITEMSTRUCT *d)
             DeleteObject(br);
         }
     } else if (kind == BK_PRIMARY) {
+        /* The VPN toggle turns red while the tunnel is up: it now stops it. */
+        BOOL     stop = (d->hwndItem == g_toggle && g_vpn_on);
         COLORREF bg = disabled ? CLR_LINE
-                    : pressed  ? CLR_ACCENT_LO
-                    : hot      ? CLR_ACCENT_HI : CLR_ACCENT;
+                    : pressed  ? (stop ? CLR_WARN_LO : CLR_ACCENT_LO)
+                    : hot      ? (stop ? CLR_WARN_HI : CLR_ACCENT_HI)
+                    : stop     ? CLR_WARN : CLR_ACCENT;
         HBRUSH   back = CreateSolidBrush(backdrop);
         FillRect(d->hDC, &r, back);
         DeleteObject(back);

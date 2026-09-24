@@ -3,7 +3,7 @@
 
 /* Must match the tag of the GitHub release this build is published under:
    the update check compares the two. Tags are plain numbers (2.0.0). */
-#define UTGARD_VERSION "2.0.2"
+#define UTGARD_VERSION "2.0.3"
 
 #define UTGARD_WIDEN_(x) L##x
 #define UTGARD_WIDEN(x)  UTGARD_WIDEN_(x)
