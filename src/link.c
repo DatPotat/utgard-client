@@ -642,6 +642,12 @@ int link_parse_wgconf(const char *text, size_t len, link_profile *out,
                 else if (section == 2 && key_is(line, "PersistentKeepalive")) {
                     char *tail;
                     long keepalive = strtol(val, &tail, 10);
+                    if (strchr(val, '-')) {
+                        if (awg_add(out->awg, sizeof out->awg, "persistent_keepalive_interval", val) != 1)
+                            return oops(err, errcap, "invalid AWG keepalive range");
+                        out->proto = LINK_AWG;
+                        goto next_line;
+                    }
                     if (!*val || *tail || keepalive < 0 || keepalive > 65535)
                         return oops(err, errcap, "PersistentKeepalive должен быть от 0 до 65535");
                     out->keepalive = (int)keepalive;
@@ -1001,8 +1007,15 @@ int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
         if (scratch[0]) {
             char *tail;
             long n = strtol(scratch, &tail, 10);
-            if (*tail || n < 0 || n > 65535) return oops(err, errcap, "неверный keepalive");
-            out->keepalive = (int)n;
+            if (strchr(scratch, '-')) {
+                if (awg_add(out->awg, sizeof out->awg, "persistent_keepalive_interval", scratch) != 1)
+                    return oops(err, errcap, "invalid AWG keepalive range");
+                out->proto = LINK_AWG;
+                if (reserved[0]) return oops(err, errcap, "AmneziaWG does not support reserved");
+            } else {
+                if (*tail || n < 0 || n > 65535) return oops(err, errcap, "неверный keepalive");
+                out->keepalive = (int)n;
+            }
         }
         return wg_finish(out, address, reserved, err, errcap);
     }

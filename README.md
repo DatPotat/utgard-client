@@ -16,7 +16,7 @@ Utgard работает на **Windows 10 и Windows 11 (x64)**.
 
 - направлять выбранные сайты и адреса через VPN;
 - направлять выбранные программы через VPN;
-- работать с профилями VLESS, VMess, Trojan, Shadowsocks, Hysteria2, WireGuard и AmneziaWG 1.x/2.0 — по ссылкам, из подписки или из файла `.conf`;
+- работать с профилями VLESS, VMess, Trojan, Shadowsocks, Hysteria2, WireGuard и AmneziaWG 1.x/2.0/3.1 — по ссылкам, из подписки или из файла `.conf`;
 - работать вместе с `zapret`;
 - работать с включённым в комплект ядром `sing-box` с поддержкой AmneziaWG;
 - запускаться вместе с Windows (по желанию) и работать из области уведомлений.
@@ -39,7 +39,7 @@ C:\Program Files\Utgard\
 
 Utgard требует права администратора для работы с сетевой маршрутизацией, поэтому Windows запросит подтверждение.
 
-Ядро `sing-box 1.14.1-utgard-awg2` входит в комплект и собирается из исходников в `vendor/`. Распаковывайте папку `sing-box` вместе с `utgard.exe`: перед запуском Utgard проверяет SHA-256 ядра, записанный при сборке. Официальный `sing-box` без изменений AmneziaWG не подходит. При обновлении заменяйте приложение и ядро вместе; сначала выключите VPN.
+Ядро `sing-box 1.14.1-utgard-awg3` входит в комплект и собирается из закреплённой зависимости `sing-box` и закреплённой зависимости AmneziaWG. Распаковывайте папку `sing-box` вместе с `utgard.exe`: перед запуском Utgard проверяет SHA-256 ядра, записанный при сборке. Официальный `sing-box` без изменений AmneziaWG не подходит. При обновлении заменяйте приложение и ядро вместе; сначала выключите VPN.
 
 ### 3. Добавьте VPN-профиль
 
@@ -54,7 +54,7 @@ Utgard требует права администратора для работ�
 
 Не поддерживаются ссылки с транспортами `xhttp` и `kcp`, а также VLESS с собственным шифрованием Xray (`encryption`): ядро `sing-box` их не умеет. Utgard сообщит об этом при добавлении.
 
-### AmneziaWG 2.0
+### AmneziaWG 3.1 (совместим с 1.x/2.0)
 
 Экспортируйте конфигурацию сервера в формате `.conf` и добавьте её через **«Файл WireGuard / AmneziaWG (.conf)…»**. В списке появится профиль **AmneziaWG**.
 
@@ -62,7 +62,9 @@ Utgard требует права администратора для работ�
 
 Используется один `[Peer]`, включая `PresharedKey` и `PersistentKeepalive`, адрес сервера IPv4/IPv6 или доменное имя. TCP и UDP передаются через пользовательский сетевой стек с IPv4/IPv6. Отдельный клиент Amnezia или его системный драйвер не нужен. `Address` задаёт адреса клиента; `AllowedIPs` и `DNS` из файла не меняют правила Utgard: трафик выбирается списками сайтов/программ, DNS — настройками приложения. `ListenPort` из файла не применяется: клиент использует свободный UDP-порт. MTU профиля — 1280–1500, по умолчанию для AWG 1280.
 
-Некорректные, повторные и неизвестные параметры отклоняются. Лимиты: `Jc` до 128, общий блок параметров менее 8192 байт, каждый сформированный UDP-пакет до 65507 байт. Поддержка AWG 3.x, команд `PreUp/PostUp` и контейнерных ссылок Amnezia `vpn://` в эту реализацию не входит; используйте экспорт `.conf` для AWG 1.x/2.0.
+Некорректные, повторные и неизвестные параметры отклоняются. Лимиты: `Jc` до 128, общий блок параметров менее 8192 байт, каждый сформированный UDP-пакет до 65507 байт. Команды `PreUp/PostUp` и контейнерные ссылки Amnezia `vpn://` не поддерживаются; используйте экспорт `.conf`.
+
+Движок закреплён на `v3.1.20260828`. Поддерживаются `HeaderProtectionKey` (base64, 32 байта; требует S1–S4 ≥ 12), `ContentPaddingAddition`, `RekeyAfterTime`, `RekeyTimeout`, `RejectAfterTime`, `KeepaliveTimeout`, `MaxHandshakeAttempts`, `RandomTrailers`, `DisableCookies` и диапазоны `PersistentKeepalive`, например `22-33`. Таймеры принимают число или диапазон uint32; дополнительный padding ограничен размером UDP-пакета.
 
 Ссылки `awg://` и `amneziawg://` используют формат WireGuard: закрытый ключ перед `@`, параметры `publickey`, `presharedkey`, `address`, `mtu`, `keepalive` в query. Параметры AWG добавляются как `S3=…`, `H1=100-200`, `I1=…` (имена AWG-параметров нечувствительны к регистру; значения кодируются percent-encoding). Параметры AWG в ссылке `wireguard://` также включают режим AmneziaWG.
 
@@ -211,11 +213,11 @@ Utgard Client распространяется под лицензией **MIT**
 
 Тексты лицензий распространяются вместе с программой в папке `licenses\`: лицензия Utgard, лицензия Parson и перечень сторонних компонентов.
 
-Utgard запускает отдельное ядро `sing-box 1.14.1-utgard-awg2` под лицензией **GPL-3.0-or-later**, собранное из `vendor/sing-box/` с интеграцией `vendor/amneziawg-go/` (**MIT**, модуль v0.2.19). Ядро входит в комплект. Исходные версии, коммиты и локальные изменения перечислены в [vendor/README.md](vendor/README.md). Лицензии ядра и зависимостей копируются в `bin/licenses/` при сборке; изменённое ядро распространяется с соответствующим исходным кодом.
+Utgard запускает отдельное ядро `sing-box 1.14.1-utgard-awg3` под лицензией **GPL-3.0-or-later**, собранное из закреплённой Go-зависимости `sing-box v1.14.1` с адаптером `core/amneziawg/` и движком AmneziaWG (**MIT**, модуль v3.1.20260828). Ядро входит в комплект. Исходные версии, коммиты и локальные изменения перечислены в [vendor/README.md](vendor/README.md). Лицензии ядра и зависимостей копируются в `bin/licenses/` при сборке; изменённое ядро распространяется с соответствующим исходным кодом.
 
 ## Сборка и проверки
 
-Для сборки нужны Go 1.25.5+, MinGW-w64 x64, Python 3 и `sha256sum`. Из корня проекта выполните `sh build.sh`. Результат — папка `bin/` с приложением, ядром и лицензиями. `sh build.sh debug` включает отладочные символы C-клиента. Первый запуск Go загружает закреплённые транзитивные зависимости; сами исходники AWG и sing-box находятся в репозитории.
+Для сборки нужны Go 1.25.5+, MinGW-w64 x64, Python 3 и `sha256sum`. Из корня проекта выполните `sh build.sh`. Результат — папка `bin/` с приложением, ядром и лицензиями. `sh build.sh debug` включает отладочные символы C-клиента. Первый запуск Go загружает закреплённые транзитивные зависимости; AWG загружается по закреплённым версии, commit SHA и SHA-256 checksum из `core/amneziawg.lock.json`, адаптер находится в `core/amneziawg/`. Исходники AmneziaWG и sing-box скачиваются как закреплённый Go-модуль и подготавливаются только в игнорируемой папке `build/`; целиком в репозиторий они не включаются.
 
 Через Docker (PowerShell):
 
@@ -230,13 +232,23 @@ docker run --rm -v "${PWD}:/work" -v utgard-go-mod:/go/pkg/mod -v utgard-go-cach
 Для дополнительной проверки полного ядра внутри Docker:
 
 ```sh
-cd vendor/sing-box
-CGO_ENABLED=0 go build -mod=readonly -tags with_gvisor,with_quic,with_wireguard,with_utls -o ../../build/core-linux ./cmd/sing-box
-cd ../..
+python3 scripts/prepare-core.py
+cd core
+CGO_ENABLED=0 go build -mod=readonly -modfile ../build/core-build.mod -overlay ../build/core-overlay.json -tags with_gvisor,with_quic,with_wireguard,with_utls -o ../build/core-linux github.com/sagernet/sing-box/cmd/sing-box
+cd ..
 python3 tests/check-core.py
 ```
 
-`python3 scripts/package.py` создаёт архив комплекта с соответствующими исходниками в `build/utgard-awg2-windows-amd64.zip`.
+Для регрессионной проверки MTU (меняется только интерфейс внутри контейнера):
+
+```powershell
+docker build -f tests/Dockerfile.mtu -t utgard-mtu-test:awg .
+docker run --rm --cap-add NET_ADMIN -v "${PWD}:/work" -v utgard-go-mod:/go/pkg/mod -v utgard-go-cache:/root/.cache/go-build utgard-mtu-test:awg sh tests/mtu.sh
+```
+
+AWG разрешает IP-фрагментацию внешних UDP-пакетов по умолчанию. Например, при MTU профиля 1280 и `S4=13` внешний IPv4-пакет достигает 1353 байт и требует фрагментации на интерфейсе с MTU 1300. Это не изменяет параметры маскировки или системный MTU.
+
+`python3 scripts/package.py` создаёт архив комплекта с соответствующими исходниками в `build/utgard-awg3-windows-amd64.zip`.
 
 ## Отказ от гарантий
 

@@ -8,9 +8,9 @@ import subprocess
 root = Path(__file__).resolve().parent.parent
 env = dict(os.environ, GOOS="windows", GOARCH="amd64", CGO_ENABLED="0")
 data = subprocess.check_output([
-    "go", "list", "-mod=readonly", "-deps", "-json",
-    "-tags", "with_gvisor,with_quic,with_wireguard,with_utls", "./cmd/sing-box",
-], cwd=root / "vendor/sing-box", env=env, text=True)
+    "go", "list", "-mod=readonly", "-modfile", str(root / "build/core-build.mod"), "-deps", "-json", "-overlay", str(root / "build/core-overlay.json"),
+    "-tags", "with_gvisor,with_quic,with_wireguard,with_utls", "github.com/sagernet/sing-box/cmd/sing-box",
+], cwd=root / "core", env=env, text=True)
 decoder = json.JSONDecoder()
 modules = {}
 while data.strip():
@@ -39,7 +39,7 @@ for name, module in sorted(modules.items()):
         found.append(str(relative))
     if not found:
         raise SystemExit(f"Missing license for linked module: {name}")
-    manifest.append({"module": name, "version": module.get("Version", "1.14.1-utgard-awg2"),
+    manifest.append({"module": name, "version": module.get("Version", "1.14.1-utgard-awg3"),
                      "licenses": found})
 # Go's runtime and standard library are also distributed in the core.
 goroot = Path(subprocess.check_output(["go", "env", "GOROOT"], text=True).strip())

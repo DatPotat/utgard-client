@@ -1,0 +1,5 @@
+	if lo == 0 && hi == ^uint32(0) {
+		// Avoid overflowing the bound to zero for the complete uint32 range.
+		return fastrandn(1<<16)<<16 | fastrandn(1<<16)
+	}
+	return lo + fastrandn(hi-lo+1)

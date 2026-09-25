@@ -5,18 +5,20 @@ Parson 1.5.4
   Compiled into utgard.exe; MIT. Full text: PARSON-MIT.txt.
   Source: https://github.com/kgabis/parson (vendor/parson in this tree).
 
-sing-box 1.14.1-utgard-awg2
+sing-box 1.14.1-utgard-awg3
   Included as a separate executable; not linked into utgard.exe.
   GPL-3.0-or-later. Full text: SING-BOX-GPL-3.0.txt and sing-box/LICENSE.
   Upstream: https://github.com/SagerNet/sing-box/tree/v1.14.1
-  Modified source and build instructions: vendor/sing-box and vendor/README.md.
+  Local adapter and build instructions: core/amneziawg and core/README.md.
+  sing-box is a pinned Go build dependency, not vendored in this repository.
+  Its verified upstream source is included in the release source archive.
   The complete corresponding Utgard source tree accompanies the release bundle.
 
-AmneziaWG Go v0.2.19 (AWG 1.x/2.0)
+AmneziaWG Go v3.1.20260828 (AWG 1.x/2.0/3.1)
   Linked into the separate sing-box executable; MIT.
   Full text: AMNEZIAWG-MIT.txt.
-  Upstream: https://github.com/amnezia-vpn/amneziawg-go/tree/v0.2.19
-  Vendored source: vendor/amneziawg-go; local fixes: vendor/README.md.
+  Upstream: https://github.com/amnezia-vpn/amneziawg-go/tree/v3.1.20260828
+  Remote source verified by core/amneziawg.lock.json; local patch: core/patches/.
 
 Go runtime and transitive core dependencies
   Original licenses/notices and pinned module versions are collected during

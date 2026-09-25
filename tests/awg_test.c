@@ -106,6 +106,17 @@ int main(void)
     genconf_text_free(json);
     strcpy(store.items[0].link.awg,"private_key=bad\n");
     assert(!genconf_build(&in,&json,err,sizeof err));
+    {
+        link_profile a = parse("S1=12\nS2=12\nS3=12\nS4=12\nHeaderProtectionKey=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\nContentPaddingAddition=8-32\nRekeyTimeout=4-8\nRandomTrailers=true\nDisableCookies=1\n",1);
+        assert(strstr(a.awg,"header_protection_key="));
+        assert(strstr(a.awg,"content_padding_addition=8-32"));
+        parse("HeaderProtectionKey=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n",0);
+        parse("RekeyTimeout=8-4\n",0);
+        char cfg[20000];
+        snprintf(cfg,sizeof cfg,"%s%s%sPersistentKeepalive=22-33\n",base,params,peer);
+        assert(link_parse_wgconf(cfg,strlen(cfg),&a,err,sizeof err));
+        assert(strstr(a.awg,"persistent_keepalive_interval=22-33"));
+    }
     puts("AWG import, validation, storage migration and generation: OK");
     return 0;
 }
