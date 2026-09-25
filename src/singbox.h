@@ -1,7 +1,8 @@
 #ifndef UTGARD_SINGBOX_H
 #define UTGARD_SINGBOX_H
 
-#include <windows.h>
+#include <stddef.h>
+#include <wchar.h>
 
 #define SB_MSG_MAX 512
 
@@ -54,6 +55,10 @@ int singbox_compile_list(wchar_t *msg, size_t cap);
 /* Start it and confirm it is still alive a moment later: a config that sing-box
    accepts can still die on startup, typically over the TUN adapter. */
 int singbox_start(const char *config, wchar_t *msg, size_t cap);
+
+/* Validate both configs before stopping. Return 1 only when the new config
+   starts; on failure try to restore fallback and explain the outcome in msg. */
+int singbox_switch(const char *config, const char *fallback, wchar_t *msg, size_t cap);
 
 /* Ask it to close before killing it: a hard kill leaves the TUN adapter and
    its routes behind. */

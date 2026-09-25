@@ -82,7 +82,7 @@ void layout(HWND hwnd)
     MoveWindow(g_toggle, c.right - PAD - S(124), TABS_H + S(26), S(124), S(32), TRUE);
     SetWindowTextW(g_toggle, g_vpn_on ? L"Выключить" : L"Включить");
     EnableWindow(g_toggle, g_vpn_on ||
-                 (g_prof.count > 0 && g_prof.active >= 0));
+                 (!g_sub_busy && g_prof.count > 0 && g_prof.active >= 0));
 
     {
         int list_top = TABS_H + S(190);
@@ -103,6 +103,7 @@ void layout(HWND hwnd)
         ShowWindow(g_prof_add, on);
         ShowWindow(g_prof_del, on);
         ShowWindow(g_prof_sub, on);
+        EnableWindow(g_plist, !g_sub_busy && !g_busy);
         EnableWindow(g_prof_del, !g_sub_busy && profile_selected() >= 0);
         EnableWindow(g_prof_add, !g_sub_busy);
         EnableWindow(g_prof_sub, !g_sub_busy);
@@ -282,6 +283,7 @@ void layout(HWND hwnd)
        Done last so it overrides the ordinary rules above. */
     if (g_busy) {
         HWND busy_off[] = {
+            g_prof_add, g_prof_del, g_prof_sub,
             g_toggle, g_zap_start, g_zap_stop, g_zap_restart, g_zap_fix,
             g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts, g_pick_path, g_zap_list,
             g_h_save, g_h_tidy, g_h_back

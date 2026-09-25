@@ -216,7 +216,7 @@ void act_subscription(HWND hwnd)
     sub_job *job;
     HANDLE   th;
 
-    if (g_sub_busy) return;
+    if (g_sub_busy || g_busy) return;
 
     to_wide(g_prof.subscription, current, PROFILE_SRC);
     if (!ask_string(hwnd, L"Подписка",
@@ -251,7 +251,7 @@ void sub_auto_check(HWND hwnd)
     long long now = _time64(NULL);
     long long due;
 
-    if (g_sub_busy || !g_prof.subscription[0]) return;
+    if (g_sub_busy || g_busy || !g_prof.subscription[0]) return;
     if (g_sub_retry && now < g_sub_retry) return;
 
     settings_load(&g_set);
@@ -299,19 +299,33 @@ typedef struct {
     const char   *overlay_ptr[32];
     profile_store store;
     genconf_input in;
+    int           switching;
+    int           previous_active;
 } vpn_inputs;
 
 static void work_vpn_on(long_job *j)
 {
     vpn_inputs *v = (vpn_inputs *)j->extra;
     char        err[256] = { 0 };
-    char       *config = NULL;
+    char       *config = NULL, *fallback = NULL;
 
     if (!genconf_build(&v->in, &config, err, sizeof err)) {
         to_wide(err, j->msg, SB_MSG_MAX);
         return;
     }
-    if (singbox_check(config, j->msg, SB_MSG_MAX))
+    if (v->switching) {
+        int selected = v->store.active;
+        v->store.active = v->previous_active;
+        if (!genconf_build(&v->in, &fallback, err, sizeof err)) {
+            v->store.active = selected;
+            to_wide(err, j->msg, SB_MSG_MAX);
+            genconf_text_free(config);
+            return;
+        }
+        v->store.active = selected;
+        j->ok = singbox_switch(config, fallback, j->msg, SB_MSG_MAX);
+        genconf_text_free(fallback);
+    } else if (singbox_check(config, j->msg, SB_MSG_MAX))
         j->ok = singbox_start(config, j->msg, SB_MSG_MAX);
     genconf_text_free(config);
 }
@@ -323,23 +337,28 @@ static void work_vpn_off(long_job *j)
 
 static void done_vpn(HWND hwnd, long_job *j)
 {
+    vpn_inputs *v = (vpn_inputs *)j->extra;
+    if (j->ok && v && v->switching) {
+        g_prof.active = v->store.active;
+        if (!profiles_save(&g_prof))
+            problem(hwnd, L"Профиль переключён, но сохранить выбор не удалось");
+    }
+    if (v && v->switching) {
+        SendMessageW(g_plist, LB_SETCURSEL, (WPARAM)g_prof.active, 0);
+        InvalidateRect(g_plist, NULL, TRUE);
+    }
     if (!j->ok)          problem(hwnd, j->msg[0] ? j->msg : L"Не удалось переключить VPN");
     else if (j->msg[0])  problem(hwnd, j->msg);     /* stopped, but had to be killed */
     vpn_refresh();
     tray_set_state(g_vpn_on);
 }
 
-void act_vpn(HWND hwnd)
+static void vpn_start(HWND hwnd, int selected)
 {
     long_job   *j;
     vpn_inputs *v;
 
-    if (g_busy) return;
-
-    if (g_vpn_on) {
-        job_start(hwnd, L"выключаю VPN…", job_new(work_vpn_off, done_vpn));
-        return;
-    }
+    if (g_busy || g_sub_busy) return;
 
     if (g_prof.count == 0 || g_prof.active < 0) {
         problem(hwnd, L"Сначала добавьте профиль");
@@ -410,6 +429,9 @@ void act_vpn(HWND hwnd)
     }
 
     v->store = g_prof;
+    v->switching = selected >= 0;
+    v->previous_active = g_prof.active;
+    if (v->switching) v->store.active = selected;
     settings_load(&g_set);
 
     v->in.base_path     = v->base;
@@ -420,7 +442,18 @@ void act_vpn(HWND hwnd)
     v->in.dns_host      = settings_dns[g_set.dns].host;
     v->in.store         = &v->store;
 
-    job_start(hwnd, L"проверяю конфигурацию и запускаю sing-box…", j);
+    job_start(hwnd, v->switching ? L"проверяю и переключаю профиль VPN…"
+                                : L"проверяю конфигурацию и запускаю sing-box…", j);
+}
+
+void act_vpn(HWND hwnd)
+{
+    if (g_busy) return;
+    vpn_refresh();
+    if (g_vpn_on)
+        job_start(hwnd, L"выключаю VPN…", job_new(work_vpn_off, done_vpn));
+    else
+        vpn_start(hwnd, -1);
 }
 
 static void profile_add_parsed(HWND hwnd, const link_profile *parsed)
@@ -538,10 +571,12 @@ static void profile_add_wgconf(HWND hwnd)
 
 void act_profile_add(HWND hwnd)
 {
-    HMENU menu = CreatePopupMenu();
+    HMENU menu;
     RECT  r;
     int   cmd;
 
+    if (g_busy || g_sub_busy) return;
+    menu = CreatePopupMenu();
     if (!menu) return;
     AppendMenuW(menu, MF_STRING, 1, L"Вставить ссылку…");
     AppendMenuW(menu, MF_STRING, 2, L"Файл WireGuard / AmneziaWG (.conf)…");
@@ -558,7 +593,7 @@ void act_profile_delete(HWND hwnd)
 {
     int i = profile_selected();
 
-    if (i < 0) return;
+    if (g_busy || g_sub_busy || i < 0) return;
 
     memmove(&g_prof.items[i], &g_prof.items[i + 1],
             (size_t)(g_prof.count - i - 1) * sizeof g_prof.items[0]);
@@ -580,7 +615,12 @@ void act_profile_activate(HWND hwnd)
 {
     int i = profile_selected();
 
-    if (i < 0 || i == g_prof.active) return;
+    if (g_busy || g_sub_busy || i < 0 || i >= g_prof.count || i == g_prof.active) return;
+    vpn_refresh();
+    if (g_vpn_on) {
+        vpn_start(hwnd, i);
+        return;
+    }
     g_prof.active = i;
     if (!profiles_save(&g_prof))
         problem(hwnd, L"Профиль выбран, но сохранить выбор не удалось");

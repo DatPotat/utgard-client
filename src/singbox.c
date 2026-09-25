@@ -1,3 +1,4 @@
+#include <windows.h>
 #include "singbox.h"
 
 #include <tlhelp32.h>
