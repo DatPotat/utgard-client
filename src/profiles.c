@@ -14,6 +14,7 @@
            version 2: transport, path, host, service_name, alpn, early_data
            version 3: alter_id, wg_private_key, wg_peer_key, wg_psk,
                       wg_address, wg_reserved, mtu, keepalive
+           version 4: awg (validated device parameters)
 
    Pack and unpack list the fields by hand in the same order. The round-trip
    test fills every field with a distinct value, so the two going out of step
@@ -24,7 +25,7 @@
 #define MAGIC_1 'T'
 #define MAGIC_2 'G'
 #define MAGIC_3 'P'
-#define FORMAT_VERSION 3u      /* 3 added vmess and wireguard; 1 and 2 still read */
+#define FORMAT_VERSION 4u      /* 4 adds AWG; versions 1-3 still read */
 
 typedef struct {
     unsigned char *buf;
@@ -134,6 +135,7 @@ static void pack_entry(writer *w, const profile_entry *e)
     w_str(w, l->wg_reserved,    sizeof l->wg_reserved);
     w_u32(w, (unsigned int)l->mtu);
     w_u32(w, (unsigned int)l->keepalive);
+    w_str(w, l->awg, sizeof l->awg);
 }
 
 static void unpack_entry(reader *r, profile_entry *e, unsigned int version)
@@ -145,7 +147,7 @@ static void unpack_entry(reader *r, profile_entry *e, unsigned int version)
 
     v = r_u32(r);
     l->proto = (v == LINK_VLESS || v == LINK_HY2 || v == LINK_SS || v == LINK_TROJAN ||
-                v == LINK_VMESS || v == LINK_WG)
+                v == LINK_VMESS || v == LINK_WG || (version >= 4 && v == LINK_AWG))
                    ? (link_proto)v : LINK_NONE;
 
     r_str(r, l->name,          sizeof l->name);
@@ -190,6 +192,7 @@ static void unpack_entry(reader *r, profile_entry *e, unsigned int version)
         v = r_u32(r);
         l->keepalive = (v <= 65535) ? (int)v : 0;
     }
+    if (version >= 4) r_str(r, l->awg, sizeof l->awg);
 }
 
 size_t profiles_pack(const profile_store *s, unsigned char *buf, size_t cap)

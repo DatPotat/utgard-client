@@ -27,8 +27,6 @@ static void paint_utgard(HDC dc, const RECT *c)
                              wtag);
         } else if (g_busy && g_busy_text) {
             StringCchCopyW(sub, 320, g_busy_text);
-        } else if (g_installing) {
-            StringCchCopyW(sub, 320, L"скачиваю sing-box, это займёт минуту…");
         } else if (!singbox_present()) {
             StringCchCopyW(sub, 320, L"нет sing-box — положите его в папку sing-box");
         } else if (g_prof.count == 0) {
@@ -379,6 +377,7 @@ static const wchar_t *proto_label(link_proto p)
     case LINK_TROJAN: return L"Trojan";
     case LINK_VMESS: return L"VMess";
     case LINK_WG:    return L"WireGuard";
+    case LINK_AWG:   return L"AmneziaWG";
     default:         return L"?";
     }
 }

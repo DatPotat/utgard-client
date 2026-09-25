@@ -194,30 +194,13 @@ int singbox_present(void)
            GetFileAttributesW(exe) != INVALID_FILE_ATTRIBUTES;
 }
 
-/* ---- first-run install ---------------------------------------------- */
+/* ---- bundled core verification -------------------------------------- */
 
-/* Pinned release and its SHA-256. Both were checked against the real archive:
-   32.8 MB, three files, sing-box.exe plus libcronet.dll, which the binary needs.
-   Changing the URL means changing the hash in the same edit. */
-#define SB_VERSION L"1.14.1"
-
-/* One place for the version: the URL and the message the user sees are built
-   from it, so they cannot drift apart. */
-static const wchar_t SB_URL[] =
-    L"https://github.com/SagerNet/sing-box/releases/download/v" SB_VERSION
-    L"/sing-box-" SB_VERSION L"-windows-amd64.zip";
-static const wchar_t SB_SHA256[] =
-    L"5197f16d492d93202dc623622149a6ed040f8eca263128f91d603f2b901baa89";
-
+/* Built together with utgard.exe; never accept an upstream binary without AWG. */
+#include "core_hash.h"
+#define SB_VERSION L"1.14.1-utgard-awg2"
+static const wchar_t SB_EXE_SHA256[] = UTGARD_CORE_SHA256;
 const wchar_t *singbox_version(void) { return SB_VERSION; }
-
-/* The two files that actually run, pinned individually. The archive hash
-   only proves the download; these prove what is on disk every time sing-box
-   is about to be started, which is when a swapped file would matter. */
-static const wchar_t SB_EXE_SHA256[] =
-    L"b838de45bd0b2e6ddbed1977e4745622f7dffab3b293807ff4c6b1b640fed909";
-static const wchar_t SB_DLL_SHA256[] =
-    L"3217c6260fbca5f16072e0b79735742f40109a63bb0ff88fd6b96dd6b54a2928";
 
 /* Hash through a handle the caller already holds. Hashing by path and then
    using the file by path leaves a window in which it can be swapped; hashing
@@ -280,16 +263,15 @@ static int open_verified(const wchar_t *path, const wchar_t *expect, HANDLE *out
     return 1;
 }
 
-typedef struct { HANDLE exe, dll; } sb_lock;
+typedef struct { HANDLE exe; } sb_lock;
 
-/* Pin both files for the duration of a launch. */
+/* Pin the verified core for the duration of a launch. */
 static int binaries_lock(sb_lock *lk, wchar_t *msg, size_t cap)
 {
-    wchar_t exe[MAX_PATH * 2], dll[MAX_PATH * 2];
+    wchar_t exe[MAX_PATH * 2];
 
-    lk->exe = lk->dll = INVALID_HANDLE_VALUE;
-    if (!singbox_exe(exe, MAX_PATH * 2) ||
-        !under_root(L"sing-box\\libcronet.dll", dll, MAX_PATH * 2))
+    lk->exe = INVALID_HANDLE_VALUE;
+    if (!singbox_exe(exe, MAX_PATH * 2))
         return say(msg, cap, L"Не удалось определить расположение sing-box");
 
     if (GetFileAttributesW(exe) == INVALID_FILE_ATTRIBUTES)
@@ -302,23 +284,13 @@ static int binaries_lock(sb_lock *lk, wchar_t *msg, size_t cap)
                 L"или это другая версия. Запуск отменён.", SB_VERSION);
         return 0;
     }
-    if (!open_verified(dll, SB_DLL_SHA256, &lk->dll)) {
-        CloseHandle(lk->exe);
-        lk->exe = INVALID_HANDLE_VALUE;
-        if (msg && cap)
-            StringCchPrintfW(msg, cap,
-                L"libcronet.dll отсутствует или не совпадает с версией %s. "
-                L"Запуск отменён.", SB_VERSION);
-        return 0;
-    }
     return 1;
 }
 
 static void binaries_unlock(sb_lock *lk)
 {
     if (lk->exe != INVALID_HANDLE_VALUE) CloseHandle(lk->exe);
-    if (lk->dll != INVALID_HANDLE_VALUE) CloseHandle(lk->dll);
-    lk->exe = lk->dll = INVALID_HANDLE_VALUE;
+    lk->exe = INVALID_HANDLE_VALUE;
 }
 
 int singbox_verified(void)
@@ -327,179 +299,6 @@ int singbox_verified(void)
     if (!binaries_lock(&lk, NULL, 0)) return 0;
     binaries_unlock(&lk);
     return 1;
-}
-
-/* Run a command and wait. Used for the system unpacker. */
-static int run_wait(const wchar_t *cmdline, DWORD *code)
-{
-    STARTUPINFOW        si;
-    PROCESS_INFORMATION pi;
-    wchar_t             mutable_cmd[2048];
-
-    if (FAILED(StringCchCopyW(mutable_cmd, 2048, cmdline))) return 0;
-
-    ZeroMemory(&si, sizeof si);
-    si.cb = sizeof si;
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-    ZeroMemory(&pi, sizeof pi);
-
-    if (!CreateProcessW(NULL, mutable_cmd, NULL, NULL, FALSE,
-                        CREATE_NO_WINDOW, NULL, NULL, &si, &pi))
-        return 0;
-
-    /* On timeout the child is killed and waited for: carrying on with the
-       cleanup while it still runs would delete files out from under it. */
-    if (WaitForSingleObject(pi.hProcess, 120000) == WAIT_TIMEOUT) {
-        TerminateProcess(pi.hProcess, 1);
-        WaitForSingleObject(pi.hProcess, 5000);
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-        *code = 1;
-        return 0;
-    }
-    if (!GetExitCodeProcess(pi.hProcess, code)) *code = 1;
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    return 1;
-}
-
-static void wipe_dir(const wchar_t *dir)
-{
-    wchar_t          mask[MAX_PATH * 2];
-    WIN32_FIND_DATAW fd;
-    HANDLE           h;
-
-    if (FAILED(StringCchPrintfW(mask, MAX_PATH * 2, L"%s\\*", dir))) return;
-    h = FindFirstFileW(mask, &fd);
-    if (h == INVALID_HANDLE_VALUE) return;
-    do {
-        wchar_t item[MAX_PATH * 2];
-        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
-        if (FAILED(StringCchPrintfW(item, MAX_PATH * 2, L"%s\\%s", dir, fd.cFileName)))
-            continue;
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) wipe_dir(item);
-        else                                                DeleteFileW(item);
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    RemoveDirectoryW(dir);
-}
-
-/* Copy every file of a directory into sing-box\. The archive keeps its
-   contents in one versioned subdirectory. */
-static int copy_files(const wchar_t *from, const wchar_t *to)
-{
-    wchar_t          mask[MAX_PATH * 2];
-    WIN32_FIND_DATAW fd;
-    HANDLE           h;
-    int              copied = 0;
-
-    if (FAILED(StringCchPrintfW(mask, MAX_PATH * 2, L"%s\\*", from))) return 0;
-    h = FindFirstFileW(mask, &fd);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-    do {
-        wchar_t src[MAX_PATH * 2], dst[MAX_PATH * 2];
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-        if (FAILED(StringCchPrintfW(src, MAX_PATH * 2, L"%s\\%s", from, fd.cFileName)) ||
-            FAILED(StringCchPrintfW(dst, MAX_PATH * 2, L"%s\\%s", to, fd.cFileName)))
-            continue;
-        if (CopyFileW(src, dst, FALSE)) copied++;
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    return copied;
-}
-
-/* The only subdirectory of dir, if there is exactly one. */
-static int only_subdir(const wchar_t *dir, wchar_t *out, size_t cap)
-{
-    wchar_t          mask[MAX_PATH * 2];
-    WIN32_FIND_DATAW fd;
-    HANDLE           h;
-    int              found = 0;
-
-    if (FAILED(StringCchPrintfW(mask, MAX_PATH * 2, L"%s\\*", dir))) return 0;
-    h = FindFirstFileW(mask, &fd);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-    do {
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
-        if (SUCCEEDED(StringCchPrintfW(out, cap, L"%s\\%s", dir, fd.cFileName))) found++;
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    return found == 1;
-}
-
-int singbox_install(wchar_t *msg, size_t cap)
-{
-    wchar_t temp[MAX_PATH * 2], zip[MAX_PATH * 2], unpack[MAX_PATH * 2];
-    wchar_t sbdir[MAX_PATH * 2], sub[MAX_PATH * 2], sys[MAX_PATH];
-    wchar_t cmd[2048], hex[80];
-    DWORD   code = 1;
-    int     ok = 0;
-    HANDLE  held = INVALID_HANDLE_VALUE;
-
-    if (msg && cap) msg[0] = L'\0';
-    if (!GetTempPathW(MAX_PATH * 2, temp)) return say(msg, cap, L"Нет временной папки");
-    if (FAILED(StringCchPrintfW(zip, MAX_PATH * 2, L"%sutgard-sing-box.zip", temp)) ||
-        FAILED(StringCchPrintfW(unpack, MAX_PATH * 2, L"%sutgard-sing-box", temp)))
-        return say(msg, cap, L"Слишком длинный путь");
-
-    if (!under_root(L"sing-box", sbdir, MAX_PATH * 2))
-        return say(msg, cap, L"Не удалось определить папку sing-box");
-    CreateDirectoryW(sbdir, NULL);
-
-    if (!net_download(SB_URL, zip, msg, cap)) goto cleanup;
-
-    /* Verify before unpacking: what comes out of this archive runs elevated.
-       The archive is opened so nobody can write, delete or rename it, hashed
-       through that handle, and kept open until tar has finished reading it -
-       so the file tar unpacks is the file that was checked. */
-    held = CreateFileW(zip, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
-                       FILE_ATTRIBUTE_NORMAL, NULL);
-    if (held == INVALID_HANDLE_VALUE) { say(msg, cap, L"Не удалось открыть архив");
-                                        goto cleanup; }
-    if (!sha256_handle(held, hex, 80)) { say(msg, cap, L"Не удалось посчитать контрольную сумму");
-                                         goto cleanup; }
-    if (_wcsicmp(hex, SB_SHA256) != 0) {
-        if (msg && cap)
-            StringCchPrintfW(msg, cap,
-                L"Контрольная сумма не совпала. Ожидалась %s, получена %s. "
-                L"Файл повреждён или подменён.", SB_SHA256, hex);
-        goto cleanup;
-    }
-
-    wipe_dir(unpack);
-    if (!CreateDirectoryW(unpack, NULL)) { say(msg, cap, L"Не удалось создать временную папку");
-                                           goto cleanup; }
-
-    /* The system unpacker, by full path on purpose: a GNU tar on PATH would
-       read "C:" as a remote host and silently extract nothing. */
-    if (!GetSystemDirectoryW(sys, MAX_PATH)) { say(msg, cap, L"Нет доступа к System32");
-                                               goto cleanup; }
-    if (FAILED(StringCchPrintfW(cmd, 2048, L"\"%s\\tar.exe\" -xf \"%s\" -C \"%s\"",
-                                sys, zip, unpack))) {
-        say(msg, cap, L"Слишком длинный путь");
-        goto cleanup;
-    }
-    if (!run_wait(cmd, &code) || code != 0) {
-        say(msg, cap, L"Не удалось распаковать архив");
-        goto cleanup;
-    }
-
-    if (!only_subdir(unpack, sub, MAX_PATH * 2))
-        StringCchCopyW(sub, MAX_PATH * 2, unpack);
-
-    if (copy_files(sub, sbdir) == 0) { say(msg, cap, L"В архиве не нашлось файлов");
-                                       goto cleanup; }
-    if (!singbox_present()) { say(msg, cap, L"В архиве не нашлось sing-box.exe");
-                              goto cleanup; }
-    ok = 1;
-
-cleanup:
-    if (held != INVALID_HANDLE_VALUE) CloseHandle(held);   /* before deleting it */
-    DeleteFileW(zip);
-    wipe_dir(unpack);
-    return ok;
 }
 
 /* ---- running a child ------------------------------------------------ */

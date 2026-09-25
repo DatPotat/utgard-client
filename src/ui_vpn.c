@@ -31,7 +31,9 @@ static int same_profile(const link_profile *a, const link_profile *b)
            strcmp(a->server, b->server) == 0 &&
            strcmp(a->uuid, b->uuid) == 0 &&
            strcmp(a->password, b->password) == 0 &&
-           strcmp(a->wg_private_key, b->wg_private_key) == 0;
+           strcmp(a->wg_private_key, b->wg_private_key) == 0 &&
+           strcmp(a->wg_peer_key, b->wg_peer_key) == 0 &&
+           strcmp(a->awg, b->awg) == 0;
 }
 
 static int profile_duplicate(const link_profile *l)
@@ -87,7 +89,8 @@ void ping_start(HWND hwnd)
         StringCchCopyA(job->target[i].server, 256, g_prof.items[i].link.server);
         job->target[i].port = g_prof.items[i].link.port;
         job->target[i].icmp = (g_prof.items[i].link.proto == LINK_HY2 ||
-                               g_prof.items[i].link.proto == LINK_WG);   /* UDP */
+                               g_prof.items[i].link.proto == LINK_WG ||
+                               g_prof.items[i].link.proto == LINK_AWG);   /* UDP */
     }
 
     th = CreateThread(NULL, 0, ping_thread, job, 0, NULL);
@@ -263,68 +266,14 @@ void sub_auto_check(HWND hwnd)
     layout(hwnd);
 }
 
-static DWORD WINAPI install_thread(LPVOID param)
-{
-    install_job *job = (install_job *)param;
-
-    job->ok = singbox_install(job->msg, SB_MSG_MAX);
-    PostMessageW(job->hwnd, WM_APP_INSTALL, 0, (LPARAM)job);
-    return 0;
-}
-
-/* Asks first. The download is 21 MB from GitHub, and a client that reaches out
-   on its own the first time it starts is not something to do silently. */
+/* The AWG-enabled core ships with the client. An upstream download would
+   silently remove protocol support, so repair means restoring the bundle. */
 void offer_install(HWND hwnd)
 {
-    wchar_t      question[900];
-    install_job *job;
-    HANDLE       th;
-
-    if (g_installing) return;
-
-    /* Present but not the pinned release - an older version left over, or a
-       modified file. Launching is refused either way, so offer the fix here
-       instead of leaving only an error at the moment of switching on. */
-    if (singbox_present()) {
-        if (singbox_verified()) return;
-        if (singbox_running()) {
-            problem(hwnd, L"Установленный sing-box не совпадает с нужной версией. "
-                          L"Выключите VPN, и программа предложит скачать правильную.");
-            return;
-        }
-        StringCchPrintfW(question, 900,
-            L"Установленный sing-box не совпадает с версией %s — это старая "
-            L"версия или изменённый файл. Запускать его программа не будет.\n\n"
-            L"Скачать правильную версию сейчас?", singbox_version());
-        if (MessageBoxW(hwnd, question, L"sing-box",
-                        MB_ICONWARNING | MB_YESNO) != IDYES)
-            return;
-        goto start_install;
-    }
-
-    StringCchPrintfW(question, 900,
-        L"Не найден sing-box — без него VPN работать не может.\n\n"
-        L"Скачать его сейчас?\n\n"
-        L"Если не хотите скачивать автоматически — загрузите sing-box %s "
-        L"для Windows x64 и положите его файлы в папку sing-box рядом с "
-        L"программой. На других версиях работоспособность не гарантируется.",
-        singbox_version());
-
-    if (MessageBoxW(hwnd, question, L"Первый запуск",
-                    MB_ICONQUESTION | MB_YESNO) != IDYES)
-        return;
-
-start_install:
-    job = (install_job *)calloc(1, sizeof *job);
-    if (!job) { problem(hwnd, L"Не хватило памяти"); return; }
-    job->hwnd = hwnd;
-
-    th = CreateThread(NULL, 0, install_thread, job, 0, NULL);
-    if (!th) { free(job); problem(hwnd, L"Не удалось запустить загрузку"); return; }
-    CloseHandle(th);
-
-    g_installing = 1;
-    layout(hwnd);
+    if (singbox_verified()) return;
+    problem(hwnd, L"Ядро sing-box отсутствует или не соответствует этой сборке Utgard. "
+                  L"Распакуйте комплект приложения целиком, включая папку sing-box. "
+                  L"Для AmneziaWG требуется ядро из комплекта Utgard.");
 }
 
 int vpn_refresh(void)
@@ -495,15 +444,15 @@ static void profile_add_parsed(HWND hwnd, const link_profile *parsed)
 
 static void profile_add_link(HWND hwnd)
 {
-    wchar_t      wide[2048];
-    char         utf8[2048];
+    wchar_t      wide[LINK_URI_MAX];
+    char         utf8[LINK_URI_MAX];
     char         err[256];
     link_profile parsed;
     wchar_t      msg[320];
 
     if (!ask_string(hwnd, L"Добавить профиль",
-                    L"Ссылка vless, vmess, hysteria2, ss, trojan или wireguard",
-                    NULL, wide, 2048))
+                    L"Ссылка vless, vmess, hysteria2, ss, trojan, wireguard или awg",
+                    NULL, wide, LINK_URI_MAX))
         return;
 
     if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8, (int)sizeof utf8,
@@ -523,7 +472,7 @@ static void profile_add_link(HWND hwnd)
 static int pick_conf(HWND owner, wchar_t *out, size_t cap)
 {
     static const COMDLG_FILTERSPEC types[] = {
-        { L"Конфигурация WireGuard (*.conf)", L"*.conf" },
+        { L"Конфигурация WireGuard / AmneziaWG (*.conf)", L"*.conf" },
         { L"Все файлы", L"*.*" }
     };
     IFileDialog *fd   = NULL;
@@ -535,7 +484,7 @@ static int pick_conf(HWND owner, wchar_t *out, size_t cap)
                                 &IID_IFileDialog, (void **)&fd)))
         return 0;
     IFileDialog_SetFileTypes(fd, 2, types);
-    IFileDialog_SetTitle(fd, L"Файл WireGuard");
+    IFileDialog_SetTitle(fd, L"Файл WireGuard / AmneziaWG");
     if (SUCCEEDED(IFileDialog_Show(fd, owner)) &&
         SUCCEEDED(IFileDialog_GetResult(fd, &item)) &&
         SUCCEEDED(IShellItem_GetDisplayName(item, SIGDN_FILESYSPATH, &wide)))
@@ -589,7 +538,7 @@ void act_profile_add(HWND hwnd)
 
     if (!menu) return;
     AppendMenuW(menu, MF_STRING, 1, L"Вставить ссылку…");
-    AppendMenuW(menu, MF_STRING, 2, L"Файл WireGuard (.conf)…");
+    AppendMenuW(menu, MF_STRING, 2, L"Файл WireGuard / AmneziaWG (.conf)…");
     GetWindowRect(g_prof_add, &r);
     cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_BOTTOMALIGN,
                          r.left, r.top, 0, hwnd, NULL);

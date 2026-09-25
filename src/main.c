@@ -32,7 +32,6 @@ int g_ping_busy;
 
 int g_vpn_on;
 
-int g_installing;
 
 HWND g_btn_hosts, g_btn_apps, g_zap_fix;
 
@@ -738,18 +737,6 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_APP_INSTALL_ASK:
         offer_install(hwnd);
         return 0;
-
-    case WM_APP_INSTALL: {
-        install_job *job = (install_job *)lp;
-
-        g_installing = 0;
-        if (!job->ok)
-            problem(hwnd, job->msg[0] ? job->msg
-                                      : L"Не удалось установить sing-box");
-        free(job);
-        layout(hwnd);
-        return 0;
-    }
 
     case WM_APP_EXC_START:
         exc_check_start(hwnd);

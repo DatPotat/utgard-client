@@ -1,0 +1,5 @@
+FROM golang:1.25.5-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 python3 && rm -rf /var/lib/apt/lists/*
+ENV GOTOOLCHAIN=local
+WORKDIR /work
+CMD ["sh", "build.sh"]

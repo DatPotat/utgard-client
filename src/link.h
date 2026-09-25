@@ -3,6 +3,8 @@
 
 #include <stddef.h>
 
+#define LINK_URI_MAX 32768
+
 /* Share-link parsing. Deliberately free of Windows headers and of wchar_t:
    the input is untrusted UTF-8 from a link or a subscription body, so this
    module is built and fuzzed on the host under ASan/UBSan as well as shipped
@@ -15,7 +17,8 @@ typedef enum {
     LINK_SS    = 3,
     LINK_TROJAN = 4,
     LINK_VMESS = 5,
-    LINK_WG    = 6
+    LINK_WG    = 6,
+    LINK_AWG   = 7
 } link_proto;
 
 typedef struct {
@@ -60,13 +63,16 @@ typedef struct {
     char wg_reserved[16];    /* optional "1,2,3" */
     int  mtu;                /* 0: sing-box default */
     int  keepalive;          /* seconds, 0: off */
+    /* Canonical, validated AWG UAPI device parameters; no keys or peers. */
+    char awg[8192];
 } link_profile;
 
 /* Parse one share link. Returns 1 on success, 0 with a message in err. */
 int link_parse(const char *uri, link_profile *out, char *err, size_t errcap);
 
-/* Parse a WireGuard configuration file ([Interface] / [Peer], as wg-quick
-   writes it). The first peer is used. The name is left empty. */
+/* Parse WireGuard or AmneziaWG [Interface]/[Peer] configuration. AWG
+   parameters select LINK_AWG automatically and require exactly one peer.
+   Ordinary WG keeps the first peer. The name is left empty. */
 int link_parse_wgconf(const char *text, size_t len, link_profile *out,
                       char *err, size_t errcap);
 

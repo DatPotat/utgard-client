@@ -114,7 +114,6 @@
 #define WM_APP_SUB_DONE  (WM_APP + 1)
 #define WM_APP_PING_ONE  (WM_APP + 2)
 #define WM_APP_PING_DONE (WM_APP + 3)
-#define WM_APP_INSTALL     (WM_APP + 4)
 #define WM_APP_INSTALL_ASK (WM_APP + 5)
 #define WM_APP_EXC_DONE    (WM_APP + 6)
 #define WM_APP_EXC_START   (WM_APP + 7)
@@ -190,7 +189,6 @@ typedef struct {
 } sub_job;
 /* ---- first run: fetch sing-box -------------------------------------- */
 
-typedef struct { HWND hwnd; wchar_t msg[SB_MSG_MAX]; int ok; } install_job;
 typedef struct {
     HWND          hwnd;
     wchar_t       dir[ZAPRET_PATH_MAX];
@@ -222,7 +220,6 @@ extern int g_ping[PROFILES_MAX];
 extern int g_ping_gen;
 extern int g_ping_busy;
 extern int g_vpn_on;
-extern int g_installing;
 extern HWND g_btn_hosts, g_btn_apps, g_zap_fix;
 extern HWND g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts, g_tip;
 extern HWND g_alist, g_app_back, g_app_pick, g_app_manual;

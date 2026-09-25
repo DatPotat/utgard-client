@@ -40,3 +40,8 @@ logs/
 # build artefacts
 bin/
 build/
+
+# Public, upstream certificate bundles and build-tool source are part of vendor.
+!vendor/sing-box/common/certificate/*.pem
+!vendor/sing-box/cmd/internal/build/
+!vendor/sing-box/cmd/internal/build/*.go

@@ -2,18 +2,23 @@ Utgard - third-party components
 ===============================
 
 Parson 1.5.4
-  Compiled into utgard.exe.
-  License: MIT - full text in PARSON-MIT.txt.
-  Source: https://github.com/kgabis/parson
+  Compiled into utgard.exe; MIT. Full text: PARSON-MIT.txt.
+  Source: https://github.com/kgabis/parson (vendor/parson in this tree).
 
-sing-box 1.14.1
-  NOT included in the Utgard archive. On first start Utgard offers to
-  download the official release from
-  https://github.com/SagerNet/sing-box/releases/tag/v1.14.1
-  and verifies it against SHA-256 checksums built into utgard.exe.
-  sing-box runs as a separate program; it is not linked into utgard.exe.
-  License: GPL-3.0-or-later. The LICENSE file from the official archive is
-  unpacked next to sing-box.exe in the sing-box folder.
-  Source: https://github.com/SagerNet/sing-box/tree/v1.14.1
-  libcronet.dll arrives in the same official archive; Utgard does not
-  redistribute it.
+sing-box 1.14.1-utgard-awg2
+  Included as a separate executable; not linked into utgard.exe.
+  GPL-3.0-or-later. Full text: SING-BOX-GPL-3.0.txt and sing-box/LICENSE.
+  Upstream: https://github.com/SagerNet/sing-box/tree/v1.14.1
+  Modified source and build instructions: vendor/sing-box and vendor/README.md.
+  The complete corresponding Utgard source tree accompanies the release bundle.
+
+AmneziaWG Go v0.2.19 (AWG 1.x/2.0)
+  Linked into the separate sing-box executable; MIT.
+  Full text: AMNEZIAWG-MIT.txt.
+  Upstream: https://github.com/amnezia-vpn/amneziawg-go/tree/v0.2.19
+  Vendored source: vendor/amneziawg-go; local fixes: vendor/README.md.
+
+Go runtime and transitive core dependencies
+  Original licenses/notices and pinned module versions are collected during
+  the build in licenses/core-dependencies/. See modules.json in that directory.
+  No libcronet.dll is used or redistributed by this build.

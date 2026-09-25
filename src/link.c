@@ -1,3 +1,4 @@
+#include "awg.h"
 #include "link.h"
 
 #include <string.h>
@@ -53,7 +54,7 @@ static int pct_decode(const char *src, size_t len, char *dst, size_t cap)
         int hi, lo;
         if (src[i] == '%' && i + 2 < len &&
             (hi = hexval(src[i + 1])) >= 0 && (lo = hexval(src[i + 2])) >= 0) {
-            if (n + 1 >= cap) { dst[0] = '\0'; return 0; }
+            if (n + 1 >= cap || (hi == 0 && lo == 0)) { dst[0] = '\0'; return 0; }
             dst[n++] = (char)((hi << 4) | lo);
             i += 2;
         } else {
@@ -571,17 +572,22 @@ int link_parse_wgconf(const char *text, size_t len, link_profile *out,
                       char *err, size_t errcap)
 {
     char        address[512] = "", endpoint[300] = "";
-    const char *p = text, *end = text + len;
+    const char *p, *end;
     int         section = 0, peers = 0;   /* 1 interface, 2 peer */
 
     if (!text || !out) return oops(err, errcap, "пустой файл");
+    p = text; end = text + len;
+    if (len >= 3 && memcmp(p, "\xef\xbb\xbf", 3) == 0) p += 3;
     memset(out, 0, sizeof *out);
     out->proto = LINK_WG;
 
     while (p < end) {
         const char *nl = memchr(p, '\n', (size_t)(end - p));
         size_t      n  = (size_t)((nl ? nl : end) - p);
-        char        line[600], *eq, *val;
+        char        line[8192], *eq, *val;
+
+        if (n >= sizeof line || memchr(p, 0, n))
+            return oops(err, errcap, "слишком длинная строка или нулевой байт в конфигурации");
 
         if (n < sizeof line) {
             memcpy(line, p, n);
@@ -596,30 +602,60 @@ int link_parse_wgconf(const char *text, size_t len, link_profile *out,
                 val = eq + 1;
                 trim(line);
                 trim(val);
-                if (section == 1 && key_is(line, "PrivateKey"))
-                    put(out->wg_private_key, sizeof out->wg_private_key, val, strlen(val));
+                if (section == 1) {
+                    int awg = awg_add(out->awg, sizeof out->awg, line, val);
+                    if (awg < 0) return oops(err, errcap, "неверный, повторный или слишком длинный параметр AmneziaWG");
+                    if (awg > 0) { out->proto = LINK_AWG; goto next_line; }
+                    if (!key_is(line, "PrivateKey") && !key_is(line, "Address") &&
+                        !key_is(line, "MTU") && !key_is(line, "DNS") && !key_is(line, "ListenPort"))
+                        return oops(err, errcap, "неподдерживаемый параметр [Interface] (поддерживаются WireGuard и AWG 1/2)");
+                }
+                if (section == 1 && key_is(line, "PrivateKey")) {
+                    if (!put(out->wg_private_key, sizeof out->wg_private_key, val, strlen(val)))
+                        return oops(err, errcap, "слишком длинный PrivateKey");
+                }
                 else if (section == 1 && key_is(line, "Address")) {
                     size_t a = strlen(address);
-                    if (a + strlen(val) + 2 < sizeof address) {
-                        if (a) address[a++] = ',';
-                        memcpy(address + a, val, strlen(val) + 1);
-                    }
-                } else if (section == 1 && key_is(line, "MTU"))
-                    out->mtu = atoi(val);
-                else if (section == 2 && key_is(line, "PublicKey"))
-                    put(out->wg_peer_key, sizeof out->wg_peer_key, val, strlen(val));
-                else if (section == 2 && key_is(line, "PresharedKey"))
-                    put(out->wg_psk, sizeof out->wg_psk, val, strlen(val));
-                else if (section == 2 && key_is(line, "Endpoint"))
-                    put(endpoint, sizeof endpoint, val, strlen(val));
-                else if (section == 2 && key_is(line, "PersistentKeepalive"))
-                    out->keepalive = atoi(val);
+                    if (a + strlen(val) + 2 >= sizeof address)
+                        return oops(err, errcap, "слишком длинный Address");
+                    if (a) address[a++] = ',';
+                    memcpy(address + a, val, strlen(val) + 1);
+                } else if (section == 1 && key_is(line, "MTU")) {
+                    char *tail;
+                    long mtu = strtol(val, &tail, 10);
+                    if (!*val || *tail || mtu < 1280 || mtu > 1500)
+                        return oops(err, errcap, "MTU должен быть от 1280 до 1500");
+                    out->mtu = (int)mtu;
+                }
+                else if (section == 2 && key_is(line, "PublicKey")) {
+                    if (!put(out->wg_peer_key, sizeof out->wg_peer_key, val, strlen(val)))
+                        return oops(err, errcap, "слишком длинный PublicKey");
+                }
+                else if (section == 2 && key_is(line, "PresharedKey")) {
+                    if (!put(out->wg_psk, sizeof out->wg_psk, val, strlen(val)))
+                        return oops(err, errcap, "слишком длинный PresharedKey");
+                }
+                else if (section == 2 && key_is(line, "Endpoint")) {
+                    if (!put(endpoint, sizeof endpoint, val, strlen(val)))
+                        return oops(err, errcap, "слишком длинный Endpoint");
+                }
+                else if (section == 2 && key_is(line, "PersistentKeepalive")) {
+                    char *tail;
+                    long keepalive = strtol(val, &tail, 10);
+                    if (!*val || *tail || keepalive < 0 || keepalive > 65535)
+                        return oops(err, errcap, "PersistentKeepalive должен быть от 0 до 65535");
+                    out->keepalive = (int)keepalive;
+                } else if (section == 2 && !key_is(line, "AllowedIPs"))
+                    return oops(err, errcap, "неподдерживаемый параметр [Peer]");
             }
         }
+next_line:
         if (!nl) break;
         p = nl + 1;
     }
 
+    if (out->proto == LINK_AWG && peers != 1) return oops(err, errcap, "AmneziaWG: нужен ровно один [Peer]");
+    if (!awg_validate(out->awg)) return oops(err, errcap, "AmneziaWG: несовместимые диапазоны H, размеры S или параметры J");
     if (!peers) return oops(err, errcap, "в файле нет раздела [Peer]");
     out->port = 51820;
     if (!endpoint[0] || !split_hostport(endpoint, strlen(endpoint), out->server,
@@ -719,7 +755,9 @@ int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
         return parse_vmess(b64, out, err, errcap);
     }
     else if (strncmp(uri, "wireguard://", 12) == 0) { out->proto = LINK_WG; body = uri + 12; out->port = 51820; }
-    else return oops(err, errcap, "нужна ссылка vless://, vmess://, hysteria2://, ss://, trojan:// или wireguard://");
+    else if (strncmp(uri, "awg://", 6) == 0) { out->proto = LINK_AWG; body = uri + 6; out->port = 51820; }
+    else if (strncmp(uri, "amneziawg://", 12) == 0) { out->proto = LINK_AWG; body = uri + 12; out->port = 51820; }
+    else return oops(err, errcap, "нужна ссылка vless://, vmess://, hysteria2://, ss://, trojan:// wireguard:// или awg://");
 
     len = strlen(body);
 
@@ -912,6 +950,7 @@ int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
         return 1;
     }
 
+    case LINK_AWG:
     case LINK_WG: {
         /* wireguard://<private key>@host:port?publickey=&presharedkey=&address=
            &reserved=&mtu=, the v2rayN share format. */
@@ -924,7 +963,47 @@ int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
         query_get(query, qlen, "address", address, sizeof address);
         query_get(query, qlen, "reserved", reserved, sizeof reserved);
         query_get(query, qlen, "mtu", scratch, sizeof scratch);
-        out->mtu = scratch[0] ? atoi(scratch) : 0;
+        if (scratch[0]) {
+            char *tail;
+            long n = strtol(scratch, &tail, 10);
+            if (*tail || n < 1280 || n > 1500) return oops(err, errcap, "неверный MTU");
+            out->mtu = (int)n;
+        }
+        {
+            const char *q = query, *end = query + qlen;
+            int unsupported = 0;
+            while (q < end) {
+                const char *stop = memchr(q, '&', (size_t)(end-q));
+                const char *eq;
+                char key[64], value[8192];
+                int result;
+                if (!stop) stop = end;
+                eq = memchr(q, '=', (size_t)(stop-q));
+                if (eq && eq-q < (int)sizeof key) {
+                    memcpy(key, q, (size_t)(eq-q)); key[eq-q] = 0;
+                    if (!pct_decode(eq+1, (size_t)(stop-eq-1), value, sizeof value))
+                        return oops(err, errcap, "повреждённый параметр WireGuard/AmneziaWG");
+                    result = awg_add(out->awg, sizeof out->awg, key, value);
+                    if (result < 0) return oops(err, errcap, "неверный параметр AmneziaWG");
+                    if (result > 0) out->proto = LINK_AWG;
+                    else if (strcmp(key, "publickey") && strcmp(key, "presharedkey") &&
+                             strcmp(key, "address") && strcmp(key, "mtu") &&
+                             strcmp(key, "reserved") && strcmp(key, "keepalive")) unsupported = 1;
+                } else unsupported = 1;
+                q = stop < end ? stop+1 : end;
+            }
+            if (unsupported && out->proto == LINK_AWG)
+                return oops(err, errcap, "неподдерживаемый параметр ссылки AmneziaWG");
+        }
+        if (!awg_validate(out->awg)) return oops(err, errcap, "несовместимые параметры AmneziaWG");
+        if (out->proto == LINK_AWG && reserved[0]) return oops(err, errcap, "AmneziaWG не поддерживает reserved");
+        query_get(query, qlen, "keepalive", scratch, sizeof scratch);
+        if (scratch[0]) {
+            char *tail;
+            long n = strtol(scratch, &tail, 10);
+            if (*tail || n < 0 || n > 65535) return oops(err, errcap, "неверный keepalive");
+            out->keepalive = (int)n;
+        }
         return wg_finish(out, address, reserved, err, errcap);
     }
 
@@ -942,6 +1021,8 @@ static int looks_like_links(const char *s, size_t len)
         if (strncmp(s + i, "vless:", 6) == 0) return 1;
         if (strncmp(s + i, "vmess:", 6) == 0) return 1;
         if (i + 10 < len && strncmp(s + i, "wireguard:", 10) == 0) return 1;
+        if (i + 4 < len && strncmp(s + i, "awg:", 4) == 0) return 1;
+        if (i + 10 < len && strncmp(s + i, "amneziawg:", 10) == 0) return 1;
         if (strncmp(s + i, "ss://", 5) == 0) return 1;
         if (i + 7 < len && strncmp(s + i, "trojan:", 7) == 0) return 1;
         if (i + 9 < len && strncmp(s + i, "hysteria2", 9) == 0) return 1;
@@ -979,7 +1060,7 @@ int link_parse_subscription(const char *body, size_t len,
     while (p < end && found < max) {
         const char *nl = memchr(p, '\n', (size_t)(end - p));
         const char *stop = nl ? nl : end;
-        char        line[2048];
+        char        line[LINK_URI_MAX];
         size_t      n = (size_t)(stop - p);
 
         while (n && (p[n - 1] == '\r' || p[n - 1] == ' ' || p[n - 1] == '\t')) n--;

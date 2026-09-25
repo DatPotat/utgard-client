@@ -1,3 +1,4 @@
+#include "awg.h"
 #include "genconf.h"
 
 #include "parson.h"
@@ -341,7 +342,8 @@ static JSON_Value *make_endpoint(const link_profile *p, const char *tag)
     JSON_Object *po = json_value_get_object(pv);
     JSON_Value  *peers = json_value_init_array();
 
-    json_object_set_string(o, "type", "wireguard");
+    json_object_set_string(o, "type", p->proto == LINK_AWG ? "amneziawg" : "wireguard");
+    if (p->proto == LINK_AWG) json_object_set_string(o, "amnezia", p->awg);
     json_object_set_string(o, "tag", tag);
     append_list(o, "address", p->wg_address);
     json_object_set_string(o, "private_key", p->wg_private_key);
@@ -551,6 +553,10 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
     if (s->active < 0 || s->active >= s->count)
         return oops(err, errcap, "Не выбран активный профиль");
 
+    for (i = 0; i < s->count; i++)
+        if (s->items[i].link.proto == LINK_AWG && !awg_validate(s->items[i].link.awg))
+            return oops(err, errcap, "неверные параметры AmneziaWG");
+
     {
         FILE *probe = open_utf8(in->base_path, "rb");
         if (!probe) {
@@ -632,7 +638,7 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
             JSON_Value *ov;
 
             genconf_tag(s, i, tag, sizeof tag);
-            if (s->items[i].link.proto == LINK_WG) {
+            if (s->items[i].link.proto == LINK_WG || s->items[i].link.proto == LINK_AWG) {
                 json_array_append_value(json_value_get_array(endpoints),
                                         make_endpoint(&s->items[i].link, tag));
             } else {

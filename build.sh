@@ -14,7 +14,7 @@
 
 set -e
 
-SRC="src/main.c src/ui_common.c src/ui_draw.c src/ui_layout.c src/ui_paint.c src/ui_vpn.c src/ui_zapret.c src/ui_lists.c src/ui_settings.c src/zapret.c src/link.c src/profiles.c src/ask.c src/net.c src/genconf.c src/singbox.c src/lists.c src/zapret_exclude.c src/apps.c src/pick.c src/settings.c src/tray.c src/fileio.c src/autostart.c src/update.c src/shellopen.c vendor/parson/parson.c"
+SRC="src/main.c src/ui_common.c src/ui_draw.c src/ui_layout.c src/ui_paint.c src/ui_vpn.c src/ui_zapret.c src/ui_lists.c src/ui_settings.c src/zapret.c src/link.c src/awg.c src/profiles.c src/ask.c src/net.c src/genconf.c src/singbox.c src/lists.c src/zapret_exclude.c src/apps.c src/pick.c src/settings.c src/tray.c src/fileio.c src/autostart.c src/update.c src/shellopen.c vendor/parson/parson.c"
 RC="res/utgard.rc"
 # The client keeps everything beside its own executable (singbox_root), so
 # bin\ is the product folder in development too, and the release archive is
@@ -90,7 +90,7 @@ WARN="-std=c11 -Wall -Wextra -Wmissing-declarations -Werror"
 # empty folder would refuse to start. Windows' own DLLs stay imports either
 # way - mingw only has import libraries for them.
 HARDEN="-fstack-protector-strong -static"
-INCLUDE="-Ivendor/parson -Isrc"
+INCLUDE="-Ivendor/parson -Isrc -Ibuild"
 DEFS="-DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE"
 LINK="-municode -mwindows"
 
@@ -133,6 +133,7 @@ if [ "$1" = "clean" ]; then
 fi
 
 mkdir -p build bin
+sh ./build-core.sh
 
 # -J sets the input format, --include-dir finds utgard.manifest next to the
 # .rc file. Older windres also accepted -I as the input format, so the long

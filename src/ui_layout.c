@@ -82,7 +82,7 @@ void layout(HWND hwnd)
     MoveWindow(g_toggle, c.right - PAD - S(124), TABS_H + S(26), S(124), S(32), TRUE);
     SetWindowTextW(g_toggle, g_vpn_on ? L"Выключить" : L"Включить");
     EnableWindow(g_toggle, g_vpn_on ||
-                 (!g_installing && g_prof.count > 0 && g_prof.active >= 0));
+                 (g_prof.count > 0 && g_prof.active >= 0));
 
     {
         int list_top = TABS_H + S(190);
