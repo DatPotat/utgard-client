@@ -39,6 +39,7 @@ type stackDevice struct {
 	packetOutbound chan *buf.Buffer
 	done           chan struct{}
 	closeOnce      sync.Once
+	outboundMu     sync.RWMutex
 	dispatcher     stack.NetworkDispatcher
 	inet4Address   netip.Addr
 	inet6Address   netip.Addr
@@ -75,6 +76,8 @@ func newStackDevice(options DeviceOptions) (*stackDevice, error) {
 		}
 		gErr := ipStack.AddProtocolAddress(tun.DefaultNIC, protoAddr, stack.AddressProperties{})
 		if gErr != nil {
+			ipStack.Close()
+			ipStack.Wait()
 			return nil, E.New("parse local address ", protoAddr.AddressWithPrefix, ": ", gErr.String())
 		}
 	}
@@ -270,6 +273,18 @@ func (w *stackDevice) Close() error {
 			endpoint.Abort()
 		}
 		w.stack.Wait()
+		w.outboundMu.Lock()
+		defer w.outboundMu.Unlock()
+		for {
+			select {
+			case packet := <-w.outbound:
+				packet.DecRef()
+			case packet := <-w.packetOutbound:
+				packet.Release()
+			default:
+				return
+			}
+		}
 	})
 	return nil
 }
@@ -327,10 +342,18 @@ func (ep *wireEndpoint) ParseHeader(ptr *stack.PacketBuffer) bool {
 }
 
 func (ep *wireEndpoint) WritePackets(list stack.PacketBufferList) (int, tcpip.Error) {
+	ep.outboundMu.RLock()
+	defer ep.outboundMu.RUnlock()
+	select {
+	case <-ep.done:
+		return 0, &tcpip.ErrClosedForSend{}
+	default:
+	}
 	for _, packetBuffer := range list.AsSlice() {
 		packetBuffer.IncRef()
 		select {
 		case <-ep.done:
+			packetBuffer.DecRef()
 			return 0, &tcpip.ErrClosedForSend{}
 		case ep.outbound <- packetBuffer:
 		}

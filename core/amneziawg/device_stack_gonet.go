@@ -37,6 +37,7 @@ func DialTCPWithBind(ctx context.Context, s *stack.Stack, localAddr, remoteAddr 
 
 	select {
 	case <-ctx.Done():
+		ep.Close()
 		return nil, ctx.Err()
 	default:
 	}
@@ -44,6 +45,7 @@ func DialTCPWithBind(ctx context.Context, s *stack.Stack, localAddr, remoteAddr 
 	// Bind before connect if requested.
 	if localAddr != (tcpip.FullAddress{}) {
 		if err = ep.Bind(localAddr); err != nil {
+			ep.Close()
 			return nil, fmt.Errorf("ep.Bind(%+v) = %s", localAddr, err)
 		}
 	}

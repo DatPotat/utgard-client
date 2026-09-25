@@ -19,7 +19,9 @@ RC="res/utgard.rc"
 # The client keeps everything beside its own executable (singbox_root), so
 # bin\ is the product folder in development too, and the release archive is
 # packed from it.
-OUT="bin/utgard.exe"
+DIST_DIR=${DIST_DIR:-bin}
+export DIST_DIR
+OUT="$DIST_DIR/utgard.exe"
 RES="build/utgard.res"
 
 # ---- pick a toolchain ------------------------------------------------
@@ -132,7 +134,7 @@ if [ "$1" = "clean" ]; then
     exit 0
 fi
 
-mkdir -p build bin
+mkdir -p build "$DIST_DIR"
 sh ./build-core.sh
 
 # -J sets the input format, --include-dir finds utgard.manifest next to the
@@ -169,11 +171,11 @@ else
 fi
 
 # The exe carries Parson, whose MIT notice must travel with every copy.
-mkdir -p bin/licenses
-cp licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt bin/licenses/
+mkdir -p "$DIST_DIR/licenses"
+cp licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt "$DIST_DIR/licenses/"
 
 echo "Собрано: $OUT"
-echo "  лицензии:   bin/licenses/"
+echo "  лицензии:   $DIST_DIR/licenses/"
 echo "  компилятор: $CC ($TARGET)"
 echo "  экзешник:   $CHECKED"
 echo "  сборка:     $MODE_NAME"

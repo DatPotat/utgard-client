@@ -573,7 +573,7 @@ int link_parse_wgconf(const char *text, size_t len, link_profile *out,
 {
     char        address[512] = "", endpoint[300] = "";
     const char *p, *end;
-    int         section = 0, peers = 0;   /* 1 interface, 2 peer */
+    int         section = 0, peers = 0, keepalive_seen = 0;   /* 1 interface, 2 peer */
 
     if (!text || !out) return oops(err, errcap, "пустой файл");
     p = text; end = text + len;
@@ -608,7 +608,7 @@ int link_parse_wgconf(const char *text, size_t len, link_profile *out,
                     if (awg > 0) { out->proto = LINK_AWG; goto next_line; }
                     if (!key_is(line, "PrivateKey") && !key_is(line, "Address") &&
                         !key_is(line, "MTU") && !key_is(line, "DNS") && !key_is(line, "ListenPort"))
-                        return oops(err, errcap, "неподдерживаемый параметр [Interface] (поддерживаются WireGuard и AWG 1/2)");
+                        return oops(err, errcap, "неподдерживаемый параметр [Interface] (поддерживаются WireGuard и AWG 1/2/3)");
                 }
                 if (section == 1 && key_is(line, "PrivateKey")) {
                     if (!put(out->wg_private_key, sizeof out->wg_private_key, val, strlen(val)))
@@ -641,14 +641,15 @@ int link_parse_wgconf(const char *text, size_t len, link_profile *out,
                 }
                 else if (section == 2 && key_is(line, "PersistentKeepalive")) {
                     char *tail;
-                    long keepalive = strtol(val, &tail, 10);
-                    if (strchr(val, '-')) {
+                    unsigned long keepalive = strtoul(val, &tail, 10);
+                    if (strstr(out->awg,"persistent_keepalive_interval=") || keepalive_seen++) return oops(err, errcap, "повторный PersistentKeepalive");
+                    if (strchr(val, '-') || (*val && !*tail && keepalive > 65535)) {
                         if (awg_add(out->awg, sizeof out->awg, "persistent_keepalive_interval", val) != 1)
-                            return oops(err, errcap, "invalid AWG keepalive range");
+                            return oops(err, errcap, "неверный диапазон keepalive AmneziaWG");
                         out->proto = LINK_AWG;
                         goto next_line;
                     }
-                    if (!*val || *tail || keepalive < 0 || keepalive > 65535)
+                    if (!*val || *tail || val[0] == '-' || keepalive > 65535)
                         return oops(err, errcap, "PersistentKeepalive должен быть от 0 до 65535");
                     out->keepalive = (int)keepalive;
                 } else if (section == 2 && !key_is(line, "AllowedIPs"))
@@ -977,7 +978,7 @@ int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
         }
         {
             const char *q = query, *end = query + qlen;
-            int unsupported = 0;
+            int unsupported = 0, keepalives = 0;
             while (q < end) {
                 const char *stop = memchr(q, '&', (size_t)(end-q));
                 const char *eq;
@@ -989,6 +990,12 @@ int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
                     memcpy(key, q, (size_t)(eq-q)); key[eq-q] = 0;
                     if (!pct_decode(eq+1, (size_t)(stop-eq-1), value, sizeof value))
                         return oops(err, errcap, "повреждённый параметр WireGuard/AmneziaWG");
+                    if (!strcmp(key, "keepalive")) {
+                        char *tail;
+                        unsigned long seconds = strtoul(value, &tail, 10);
+                        if (keepalives++) return oops(err, errcap, "повторный keepalive");
+                        if (strchr(value, '-') || (*value && !*tail && seconds > 65535)) out->proto = LINK_AWG;
+                    }
                     result = awg_add(out->awg, sizeof out->awg, key, value);
                     if (result < 0) return oops(err, errcap, "неверный параметр AmneziaWG");
                     if (result > 0) out->proto = LINK_AWG;
@@ -1005,15 +1012,16 @@ int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
         if (out->proto == LINK_AWG && reserved[0]) return oops(err, errcap, "AmneziaWG не поддерживает reserved");
         query_get(query, qlen, "keepalive", scratch, sizeof scratch);
         if (scratch[0]) {
+            if (strstr(out->awg,"persistent_keepalive_interval=")) return oops(err, errcap, "повторный keepalive");
             char *tail;
-            long n = strtol(scratch, &tail, 10);
-            if (strchr(scratch, '-')) {
+            unsigned long n = strtoul(scratch, &tail, 10);
+            if (strchr(scratch, '-') || (!*tail && n > 65535)) {
                 if (awg_add(out->awg, sizeof out->awg, "persistent_keepalive_interval", scratch) != 1)
-                    return oops(err, errcap, "invalid AWG keepalive range");
+                    return oops(err, errcap, "неверный диапазон keepalive AmneziaWG");
                 out->proto = LINK_AWG;
                 if (reserved[0]) return oops(err, errcap, "AmneziaWG does not support reserved");
             } else {
-                if (*tail || n < 0 || n > 65535) return oops(err, errcap, "неверный keepalive");
+                if (*tail || scratch[0] == '-' || n > 65535) return oops(err, errcap, "неверный keepalive");
                 out->keepalive = (int)n;
             }
         }

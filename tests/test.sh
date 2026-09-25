@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+python3 tests/core_sources_test.py
 mkdir -p build
 cc -std=c11 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
     -Isrc -Ivendor/parson tests/awg_test.c src/awg.c src/link.c src/profiles.c src/genconf.c vendor/parson/parson.c \

@@ -41,6 +41,6 @@ versus inner MTU 1280 plus AWG overhead, using the production dialer. It verifie
 both successful packet reassembly and rejection when fragmentation is disabled.
 
 The packaged source archive includes this integration and the verified upstream
-dependencies under `dependencies/sing-box/` and `dependencies/amneziawg-go/`; that source is copied from
-the Go cache only at packaging time, not kept in this repository's vendor tree.
+dependencies under `dependencies/sing-box/` and `dependencies/amneziawg-go/`; these sources are staged from verified Go modules during the build,
+then included in the release archive. They are not kept in the vendor tree.
 The complete corresponding source and licenses accompany the distributed core.

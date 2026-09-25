@@ -113,9 +113,17 @@ int main(void)
         parse("HeaderProtectionKey=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n",0);
         parse("RekeyTimeout=8-4\n",0);
         char cfg[20000];
-        snprintf(cfg,sizeof cfg,"%s%s%sPersistentKeepalive=22-33\n",base,params,peer);
+        snprintf(cfg,sizeof cfg,"%s%s[Peer]\nPublicKey=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\nEndpoint=127.0.0.1:51820\nPersistentKeepalive=22-33\n",base,params);
         assert(link_parse_wgconf(cfg,strlen(cfg),&a,err,sizeof err));
         assert(strstr(a.awg,"persistent_keepalive_interval=22-33"));
+        strcat(cfg,"PersistentKeepalive=20\n");
+        assert(!link_parse_wgconf(cfg,strlen(cfg),&a,err,sizeof err));
+        char *ka = strstr(cfg,"PersistentKeepalive=");
+        strcpy(ka,"PersistentKeepalive=4294967295\n");
+        assert(link_parse_wgconf(cfg,strlen(cfg),&a,err,sizeof err));
+        assert(strstr(a.awg,"persistent_keepalive_interval=4294967295"));
+        strcpy(ka,"PersistentKeepalive=4294967296\n");
+        assert(!link_parse_wgconf(cfg,strlen(cfg),&a,err,sizeof err));
     }
     puts("AWG import, validation, storage migration and generation: OK");
     return 0;

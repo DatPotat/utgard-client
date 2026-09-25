@@ -19,7 +19,7 @@ while data.strip():
     module = item.get("Module")
     if module:
         modules[module["Path"]] = module
-destination = root / "bin/licenses/core-dependencies"
+destination = root / os.environ.get("DIST_DIR", "bin") / "licenses/core-dependencies"
 destination.mkdir(parents=True, exist_ok=True)
 manifest = []
 for name, module in sorted(modules.items()):

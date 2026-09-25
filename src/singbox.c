@@ -198,7 +198,7 @@ int singbox_present(void)
 
 /* Built together with utgard.exe; never accept an upstream binary without AWG. */
 #include "core_hash.h"
-#define SB_VERSION L"1.14.1-utgard-awg2"
+#define SB_VERSION L"1.14.1-utgard-awg3"
 static const wchar_t SB_EXE_SHA256[] = UTGARD_CORE_SHA256;
 const wchar_t *singbox_version(void) { return SB_VERSION; }
 

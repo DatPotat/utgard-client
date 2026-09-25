@@ -4,6 +4,7 @@ package amneziawg
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -64,6 +65,9 @@ func (c *captureConn) Write(p []byte) (int, error) {
 	return c.Conn.Write(p)
 }
 func (d *captureDialer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	if destination.IsDomain() {
+		return nil, fmt.Errorf("endpoint must dial the resolved IP")
+	}
 	c, err := (&net.Dialer{}).DialContext(ctx, network, destination.String())
 	if err != nil {
 		return nil, err
@@ -145,7 +149,8 @@ func testEncryptedTraffic(t *testing.T, parameters string, checkAWG2 bool) {
 	}
 	capture := new(captureDialer)
 	client := &Endpoint{ctx: ctx, logger: logger, stack: clientStack, dialer: capture,
-		options: Options{WireGuardEndpointOptions: option.WireGuardEndpointOptions{Peers: []option.WireGuardPeer{{Address: "127.0.0.1", Port: port}}}},
+		dns:     fixedDNS{address: netip.MustParseAddr("127.0.0.1")},
+		options: Options{WireGuardEndpointOptions: option.WireGuardEndpointOptions{Peers: []option.WireGuardPeer{{Address: "server.test", Port: port}}}},
 		ipc:     "private_key=" + clientPrivate + "\n" + parameters + "public_key=" + serverPublic + "\npreshared_key=" + psk + "\nallowed_ip=0.0.0.0/0\nallowed_ip=::/0\n",
 	}
 	defer client.Close()
@@ -264,5 +269,35 @@ func TestAWG3Parameters(t *testing.T) {
 		if _, err := validateParameters(bad, 1280); err == nil {
 			t.Fatal("accepted invalid AWG3 parameters")
 		}
+	}
+}
+
+func TestAWG3EndpointConfiguration(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("a", 32)))
+	options := Options{WireGuardEndpointOptions: option.WireGuardEndpointOptions{
+		Address:    []netip.Prefix{netip.MustParsePrefix("10.50.0.2/32")},
+		PrivateKey: key,
+		Peers: []option.WireGuardPeer{{Address: "127.0.0.1", Port: 51820, PublicKey: key,
+			AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}}},
+	}, Amnezia: "s1=12\ns2=12\ns3=12\ns4=12\nheader_protection_key=" + key +
+		"\npersistent_keepalive_interval=22-33\n"}
+	ep, err := NewEndpoint(context.Background(), nil, log.NewNOPFactory().Logger(), "awg3-test", options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ep.Close()
+	endpoint := ep.(*Endpoint)
+	if strings.Index(endpoint.ipc, "persistent_keepalive_interval=") < strings.Index(endpoint.ipc, "public_key=") {
+		t.Fatal("keepalive must be a peer setting")
+	}
+	if err = ep.Start(adapter.StartStatePostStart); err != nil {
+		t.Fatal(err)
+	}
+	state, err := endpoint.device.IpcGet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(state, "persistent_keepalive_interval=22-33") {
+		t.Fatal("keepalive range was not applied")
 	}
 }

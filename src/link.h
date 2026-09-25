@@ -63,7 +63,8 @@ typedef struct {
     char wg_reserved[16];    /* optional "1,2,3" */
     int  mtu;                /* 0: sing-box default */
     int  keepalive;          /* seconds, 0: off */
-    /* Canonical, validated AWG UAPI device parameters; no keys or peers. */
+    /* Validated AWG parameters, including header key and keepalive range.
+       Private/public peer keys remain in the dedicated fields above. */
     char awg[8192];
 } link_profile;
 

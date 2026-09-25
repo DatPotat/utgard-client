@@ -151,7 +151,11 @@ func (e *Endpoint) Start(stage adapter.StartStage) error {
 	destination := M.ParseSocksaddrHostPort(peer.Address, peer.Port)
 	address := destination.Addr
 	if destination.IsDomain() {
-		addresses, err := e.dns.Lookup(e.ctx, destination.Fqdn, e.dialer.(dialer.ResolveDialer).QueryOptions())
+		var queryOptions adapter.DNSQueryOptions
+		if resolver, ok := e.dialer.(dialer.ResolveDialer); ok {
+			queryOptions = resolver.QueryOptions()
+		}
+		addresses, err := e.dns.Lookup(e.ctx, destination.Fqdn, queryOptions)
 		if err != nil {
 			return err
 		}
@@ -161,7 +165,7 @@ func (e *Endpoint) Start(stage adapter.StartStage) error {
 		address = addresses[0]
 	}
 	remote := netip.AddrPortFrom(address, peer.Port)
-	bind := &clientBind{ctx: e.ctx, dialer: e.dialer, destination: destination, endpoint: remoteEndpoint(remote)}
+	bind := &clientBind{ctx: e.ctx, dialer: e.dialer, destination: M.SocksaddrFromNetIP(remote), endpoint: remoteEndpoint(remote)}
 	logger := &device.Logger{
 		Verbosef: func(format string, args ...any) { e.logger.Debug(fmt.Sprintf(format, args...)) },
 		Errorf:   func(format string, args ...any) { e.logger.Error(fmt.Sprintf(format, args...)) },
@@ -179,6 +183,7 @@ func (e *Endpoint) Start(stage adapter.StartStage) error {
 	e.device = wg
 	e.ipc = ""
 	e.options.PrivateKey = ""
+	e.options.Amnezia = ""
 	e.options.Peers[0].PreSharedKey = ""
 	return nil
 }

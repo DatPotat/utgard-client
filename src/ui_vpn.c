@@ -33,6 +33,10 @@ static int same_profile(const link_profile *a, const link_profile *b)
            strcmp(a->password, b->password) == 0 &&
            strcmp(a->wg_private_key, b->wg_private_key) == 0 &&
            strcmp(a->wg_peer_key, b->wg_peer_key) == 0 &&
+           strcmp(a->wg_psk, b->wg_psk) == 0 &&
+           strcmp(a->wg_address, b->wg_address) == 0 &&
+           strcmp(a->wg_reserved, b->wg_reserved) == 0 &&
+           a->mtu == b->mtu && a->keepalive == b->keepalive &&
            strcmp(a->awg, b->awg) == 0;
 }
 
@@ -177,7 +181,9 @@ void subscription_apply(HWND hwnd, const wchar_t *url,
             if (o->proto == was_active.proto && o->port == was_active.port &&
                 strcmp(o->server, was_active.server) == 0 &&
                 strcmp(o->uuid, was_active.uuid) == 0 &&
-                strcmp(o->password, was_active.password) == 0) {
+                strcmp(o->password, was_active.password) == 0 &&
+                strcmp(o->wg_private_key, was_active.wg_private_key) == 0 &&
+                strcmp(o->wg_peer_key, was_active.wg_peer_key) == 0) {
                 g_prof.active = i;
                 break;
             }

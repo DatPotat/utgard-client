@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import subprocess
 import shutil
+from core_sources import stage_source, verify_awg
 
 root = Path(__file__).resolve().parent.parent
 module = json.loads(subprocess.check_output(
@@ -20,34 +21,17 @@ build.mkdir(exist_ok=True)
 # Go forbids overlays inside GOMODCACHE. Stage the verified dependency in the
 # ignored build directory and use a temporary modfile; never edit core/go.mod.
 source = build / "sing-box-source"
-if source.exists():
-    source.chmod(0o755)
-    for directory in source.rglob("*"):
-        if directory.is_dir():
-            directory.chmod(0o755)
-def copy_source(src, dst):
-    target = Path(dst)
-    if target.exists():
-        target.chmod(0o644)
-    return shutil.copyfile(src, dst)
-shutil.copytree(module["Dir"], source, dirs_exist_ok=True, copy_function=copy_source)
 lock = json.loads((root / "core/amneziawg.lock.json").read_text(encoding="utf-8"))
 awg = json.loads(subprocess.check_output(
     ["go", "mod", "download", "-json", lock["module"] + "@" + lock["version"]],
     cwd=root / "core", text=True))
-if (awg.get("Error") or awg.get("Version") != lock["version"] or
-        awg.get("Sum") != lock["sum"] or awg.get("GoModSum") != lock["go_mod_sum"] or
-        awg.get("Origin", {}).get("Hash") != lock["commit"]):
-    raise SystemExit("AmneziaWG version, commit or checksum mismatch")
+verify_awg(awg, lock)
 # Check cached archive AND extracted sources before staging; download metadata
 # alone must not allow a locally modified module-cache directory through.
 subprocess.run(["go", "mod", "verify"], cwd=root / "core", check=True)
 awg_source = build / "amneziawg-source"
-if awg_source.exists():
-    awg_source.chmod(0o755)
-    for directory in awg_source.rglob("*"):
-        if directory.is_dir(): directory.chmod(0o755)
-shutil.copytree(awg["Dir"], awg_source, dirs_exist_ok=True, copy_function=copy_source)
+stage_source(module["Dir"], source, build)
+stage_source(awg["Dir"], awg_source, build)
 range_file = awg_source / "device/noise-types.go"
 range_text = range_file.read_text(encoding="utf-8")
 original_range = "\treturn lo + fastrandn(hi-lo+1)"
