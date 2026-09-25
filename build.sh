@@ -1,123 +1,33 @@
 #!/bin/sh
-# Build the Utgard client.
+# Build the Utgard client for Windows x64 and arm64.
 #
 # Works in two places:
-#   - Git Bash / MSYS2 / w64devkit on Windows  -> native gcc
-#   - Linux with mingw-w64 installed           -> x86_64-w64-mingw32-gcc
+#   - Git Bash / MSYS2 / w64devkit on Windows  -> native gcc (x64)
+#   - Linux with mingw-w64                      -> x86_64-w64-mingw32-gcc
+# arm64 needs an aarch64 mingw toolchain, such as llvm-mingw
+# (aarch64-w64-mingw32-clang) on PATH.
 #
-# Usage: ./build.sh [debug|clean]
+# Usage: [ARCH=x64|arm64] ./build.sh [debug|clean]
+#   (no ARCH)     both architectures
 #   (no argument) release build, symbols stripped
 #   debug         keep symbols for gdb
-#   clean         remove build/
+#   clean         remove the build and output folders
 #
-# CC and WINDRES may be set in the environment to override detection.
+# Output: bin/x64/ and bin/arm64/, each a complete product folder -
+# utgard.exe and licenses/ - ready to be packed into its own archive.
+# CC and WINDRES may be set in the environment to override detection
+# (only when building a single ARCH).
 
 set -e
 
-SRC="src/main.c src/ui_common.c src/ui_draw.c src/ui_layout.c src/ui_paint.c src/ui_vpn.c src/ui_zapret.c src/ui_lists.c src/ui_settings.c src/zapret.c src/link.c src/profiles.c src/ask.c src/net.c src/genconf.c src/singbox.c src/lists.c src/zapret_exclude.c src/apps.c src/pick.c src/settings.c src/tray.c src/fileio.c src/autostart.c src/update.c src/shellopen.c vendor/parson/parson.c"
+# ---- what every architecture shares ---------------------------------
+
+SRC="$(ls src/core/*.c src/win/*.c src/ui/*.c | sort | tr '\n' ' ')vendor/parson/parson.c vendor/puff/puff.c"
 RC="res/utgard.rc"
-# The client keeps everything beside its own executable (singbox_root), so
-# bin\ is the product folder in development too, and the release archive is
-# packed from it.
-OUT="bin/utgard.exe"
-RES="build/utgard.res"
-
-# ---- pick a toolchain ------------------------------------------------
-
-if [ -n "$CC" ]; then
-    : "${WINDRES:=windres}"
-elif command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
-    CC=x86_64-w64-mingw32-gcc
-    WINDRES=x86_64-w64-mingw32-windres
-elif command -v gcc >/dev/null 2>&1; then
-    CC=gcc
-    WINDRES=windres
-else
-    echo "Компилятор не найден." >&2
-    echo "В обычном Git Bash gcc отсутствует — нужен MSYS2 UCRT64 или w64devkit." >&2
-    exit 1
-fi
-
-if ! command -v "$WINDRES" >/dev/null 2>&1; then
-    echo "Нет $WINDRES — без него не встроить манифест." >&2
-    exit 1
-fi
-
-# The compiler must target Windows, not the MSYS/Cygwin emulation layer:
-# an MSYS-targeted gcc produces a binary that needs msys-2.0.dll to start.
-TARGET=$("$CC" -dumpmachine)
-case "$TARGET" in
-    x86_64*mingw*) ;;
-    *msys*|*cygwin*)
-        echo "Компилятор нацелен на $TARGET." >&2
-        echo "Это gcc среды MSYS/Cygwin: его программы требуют msys-2.0.dll рядом." >&2
-        echo "Нужен gcc из UCRT64/MINGW64 или из w64devkit." >&2
-        exit 1 ;;
-    mingw32|i686*)
-        echo "Компилятор нацелен на $TARGET — это 32-битный MinGW.org." >&2
-        echo "Он не умеет 64-битные программы и не поддерживает -municode." >&2
-        echo "Нужен mingw-w64 (w64devkit или MSYS2 UCRT64)." >&2
-        exit 1 ;;
-    *)  echo "Компилятор нацелен на $TARGET, а нужен x86_64-*-mingw32." >&2
-        exit 1 ;;
-esac
-
-mkdir -p build
-
-# The version string can lie about what the toolchain supports; a wide entry
-# point is what actually breaks on MinGW.org, so test exactly that.
-cat > build/.probe.c <<'PROBE'
-#include <windows.h>
-int WINAPI wWinMain(HINSTANCE a, HINSTANCE b, PWSTR c, int d)
-{ (void)a; (void)b; (void)c; (void)d; return 0; }
-PROBE
-if ! "$CC" -municode -mwindows build/.probe.c -o build/.probe.exe >/dev/null 2>&1; then
-    rm -f build/.probe.c build/.probe.exe
-    echo "Компилятор не собрал пробу с -municode и wWinMain." >&2
-    echo "В crt нет стартового кода для Unicode — нужен mingw-w64." >&2
-    exit 1
-fi
-rm -f build/.probe.c build/.probe.exe
-
-# ---- flags -----------------------------------------------------------
-
-WARN="-std=c11 -Wall -Wextra -Wmissing-declarations -Werror"
-# Stack canaries on functions with local arrays or taken addresses. ASLR,
-# DEP and high-entropy ASLR are already on: modern binutils sets them by
-# default for PE, and the check at the end of this script confirms it.
-# -static keeps the support code for the canaries inside the executable:
-# without it gcc links libssp-0.dll dynamically, and a bare utgard.exe in an
-# empty folder would refuse to start. Windows' own DLLs stay imports either
-# way - mingw only has import libraries for them.
-HARDEN="-fstack-protector-strong -static"
-INCLUDE="-Ivendor/parson -Isrc"
-DEFS="-DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE"
-LINK="-municode -mwindows"
-
-if [ "$1" = "debug" ]; then
-    MODE="-g -O0"
-    MODE_NAME="отладочная, с символами"
-else
-    MODE="-O2 -s"
-    MODE_NAME="рабочая, символы убраны"
-fi
-LIBS="-lgdi32 -luser32 -ldwmapi -lole32 -luuid -lcrypt32 -lwinhttp -lws2_32 -liphlpapi -luxtheme -lbcrypt -lcomctl32 -loleaut32 -ltaskschd"
-
-# Source is UTF-8 and UI strings are wide literals. Pinning the charsets
-# makes that explicit, but the options need libiconv, which some GCC
-# builds (w64devkit) ship without. Use them only if this compiler takes them.
-CHARSET=""
-if echo 'int main(void){return 0;}' > build/.probe.c 2>/dev/null &&
-   "$CC" -finput-charset=UTF-8 -fexec-charset=UTF-8 -fwide-exec-charset=UTF-16LE \
-        -c build/.probe.c -o build/.probe.o >/dev/null 2>&1; then
-    CHARSET="-finput-charset=UTF-8 -fexec-charset=UTF-8 -fwide-exec-charset=UTF-16LE"
-fi
-rm -f build/.probe.c build/.probe.o
-
-# ---- build -----------------------------------------------------------
+NEED="src/version.h vendor/puff/puff.h $RC res/utgard.manifest.in res/utgard.ico res/utgard-tray-off.ico res/utgard-tray-on.ico licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt"
 
 MISSING=""
-for f in $SRC src/zapret.h src/link.h src/profiles.h src/ask.h src/net.h src/lists.h src/genconf.h src/singbox.h src/ui.h src/autostart.h src/update.h src/shellopen.h src/version.h res/utgard.rc res/utgard.manifest res/utgard.ico res/utgard-tray-off.ico res/utgard-tray-on.ico licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt; do
+for f in $SRC $NEED; do
     [ -f "$f" ] || MISSING="$MISSING $f"
 done
 if [ -n "$MISSING" ]; then
@@ -126,58 +36,168 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 
-if [ "$1" = "clean" ]; then
-    rm -rf build "$OUT"
-    echo "Очищено."
-    exit 0
+# The version lives in src/version.h only; the manifest is stamped from it.
+VERSION=$(sed -n 's/^#define UTGARD_VERSION "\([0-9]*\.[0-9]*\.[0-9]*\)"$/\1/p' src/version.h)
+if [ -z "$VERSION" ]; then
+    echo "В src/version.h нет строки #define UTGARD_VERSION \"X.Y.Z\"." >&2
+    exit 1
 fi
 
-mkdir -p build bin
+WARN="-std=c11 -Wall -Wextra -Wmissing-declarations -Werror"
+# Stack canaries on functions with local arrays or taken addresses. ASLR,
+# DEP and high-entropy ASLR are already on: modern binutils sets them by
+# default for PE, and the check below confirms it. -static keeps the
+# support code for the canaries inside the executable: without it gcc links
+# libssp-0.dll dynamically, and a bare utgard.exe would refuse to start.
+HARDEN="-fstack-protector-strong -static"
+INCLUDE="-Ivendor/parson -Ivendor/puff -Isrc -Isrc/core -Isrc/win -Isrc/ui"
+DEFS="-DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE"
+LINK="-municode -mwindows"
+LIBS="-lgdi32 -luser32 -ldwmapi -lole32 -luuid -lcrypt32 -lwinhttp -lws2_32 -liphlpapi -luxtheme -lbcrypt -lcomctl32 -loleaut32"
 
-# -J sets the input format, --include-dir finds utgard.manifest next to the
-# .rc file. Older windres also accepted -I as the input format, so the long
-# form is the only unambiguous spelling.
-"$WINDRES" -J rc --include-dir=res "$RC" -O coff -o "$RES"
-# shellcheck disable=SC2086
-"$CC" $WARN $HARDEN $INCLUDE $DEFS $LINK $MODE $CHARSET $SRC "$RES" -o "$OUT" $LIBS
+if [ "$1" = "debug" ]; then
+    MODE="-g -O0"
+    MODE_NAME="отладочная, с символами"
+else
+    MODE="-O2 -s"
+    MODE_NAME="рабочая, символы убраны"
+fi
 
-# Check the executable itself, not the flags that were meant to produce it.
-# Catches two things that already went wrong once: a gcc support DLL sneaking
-# in as a dependency (the exe would not start alone), and a missing ASLR/DEP.
-case "$CC" in
-    x86_64-w64-mingw32-*) OBJDUMP=x86_64-w64-mingw32-objdump ;;
-    *)                    OBJDUMP=objdump ;;
-esac
-if command -v "$OBJDUMP" >/dev/null 2>&1; then
-    HEAD=$("$OBJDUMP" -p "$OUT")
-    EXTRA=$(printf '%s\n' "$HEAD" | grep "DLL Name:" | grep -i "lib.*-[0-9]*\.dll" || true)
-    if [ -n "$EXTRA" ]; then
-        echo "Экзешник зависит от библиотек, которых нет в Windows:" >&2
-        echo "$EXTRA" >&2
+# ---- one architecture -------------------------------------------------
+
+build_arch() {
+    ARCH=$1
+    case "$ARCH" in
+        x64)   TRIPLE=x86_64-w64-mingw32 ;;
+        arm64) TRIPLE=aarch64-w64-mingw32 ;;
+    esac
+    BIN="bin/$ARCH"
+    BUILD="build/$ARCH"
+    OUT="$BIN/utgard.exe"
+
+    if [ "$2" = "clean" ]; then
+        rm -rf "$BUILD" "$BIN"
+        echo "Очищено: $ARCH"
+        return
+    fi
+
+    # Toolchain: the caller's, then gcc or clang for the triple, then plain
+    # gcc for x64 (MSYS2 UCRT64, w64devkit).
+    if [ -n "$CC_ONE" ]; then
+        CC=$CC_ONE; WINDRES=${WINDRES_ONE:-windres}
+    elif command -v "$TRIPLE-gcc" >/dev/null 2>&1; then
+        CC=$TRIPLE-gcc; WINDRES=$TRIPLE-windres
+    elif command -v "$TRIPLE-clang" >/dev/null 2>&1; then
+        CC=$TRIPLE-clang; WINDRES=$TRIPLE-windres
+    elif [ "$ARCH" = x64 ] && command -v gcc >/dev/null 2>&1; then
+        CC=gcc; WINDRES=windres
+    else
+        echo "Компилятор для $ARCH не найден ($TRIPLE-gcc или $TRIPLE-clang)." >&2
+        if [ "$ARCH" = arm64 ]; then
+            echo "Для arm64 нужен llvm-mingw (https://github.com/mstorsjo/llvm-mingw/releases," >&2
+            echo "на Windows x64 — архив ...-ucrt-x86_64.zip); путь к его bin добавьте в конец PATH:" >&2
+            echo "  PATH=\"\$PATH:/путь/к/llvm-mingw/bin\" ./build.sh" >&2
+            echo "Только x64: ARCH=x64 ./build.sh" >&2
+        else
+            echo "В обычном Git Bash gcc отсутствует — нужен MSYS2 UCRT64 или w64devkit." >&2
+        fi
         exit 1
     fi
-    for flag in DYNAMIC_BASE NX_COMPAT HIGH_ENTROPY_VA; do
-        if ! printf '%s\n' "$HEAD" | grep -q "$flag"; then
-            echo "В экзешнике не включён $flag" >&2
+    if ! command -v "$WINDRES" >/dev/null 2>&1; then
+        echo "Нет $WINDRES — без него не встроить манифест." >&2
+        exit 1
+    fi
+
+    # gcc names the target *-w64-mingw32, clang (llvm-mingw) *-w64-windows-gnu.
+    TARGET=$("$CC" -dumpmachine 2>/dev/null || echo unknown)
+    case "$ARCH:$TARGET" in
+        x64:x86_64*mingw*|x64:x86_64-w64-windows-gnu|arm64:aarch64*mingw*|arm64:aarch64-w64-windows-gnu) ;;
+        *)  echo "Компилятор $CC нацелен на $TARGET, а для $ARCH нужен $TRIPLE." >&2
+            exit 1 ;;
+    esac
+
+    mkdir -p "$BUILD" "$BIN"
+
+    # The version string can lie about what the toolchain supports; a wide
+    # entry point is what actually breaks on MinGW.org, so test exactly that.
+    cat > "$BUILD"/.probe.c <<'PROBE'
+#include <windows.h>
+int WINAPI wWinMain(HINSTANCE a, HINSTANCE b, PWSTR c, int d)
+{ (void)a; (void)b; (void)c; (void)d; return 0; }
+PROBE
+    if ! "$CC" -municode -mwindows "$BUILD"/.probe.c -o "$BUILD"/.probe.exe >/dev/null 2>&1; then
+        rm -f "$BUILD"/.probe.c "$BUILD"/.probe.exe
+        echo "Компилятор не собрал пробу с -municode и wWinMain — нужен mingw-w64." >&2
+        exit 1
+    fi
+    rm -f "$BUILD"/.probe.c "$BUILD"/.probe.exe
+
+    # Source is UTF-8 and UI strings are wide literals. The charset options
+    # need libiconv, which some builds ship without: used only if taken.
+    CHARSET=""
+    echo 'int main(void){return 0;}' > "$BUILD"/.probe.c
+    if "$CC" -finput-charset=UTF-8 -fexec-charset=UTF-8 -fwide-exec-charset=UTF-16LE \
+            -c "$BUILD"/.probe.c -o "$BUILD"/.probe.o >/dev/null 2>&1; then
+        CHARSET="-finput-charset=UTF-8 -fexec-charset=UTF-8 -fwide-exec-charset=UTF-16LE"
+    fi
+    rm -f "$BUILD"/.probe.c "$BUILD"/.probe.o
+
+    # The manifest carries the version as four numbers. The generated copy
+    # sits in the build folder, found first through --include-dir.
+    sed "s/@VERSION4@/$VERSION.0/" res/utgard.manifest.in > "$BUILD/utgard.manifest"
+    "$WINDRES" -J rc --include-dir="$BUILD" --include-dir=res "$RC" -O coff -o "$BUILD/utgard.res"
+    # shellcheck disable=SC2086
+    "$CC" $WARN $HARDEN $INCLUDE $DEFS $LINK $MODE $CHARSET $SRC "$BUILD/utgard.res" -o "$OUT" $LIBS
+
+    # Check the executable itself, not the flags that were meant to produce
+    # it: a gcc support DLL sneaking in as a dependency, or missing ASLR/DEP.
+    case "$CC" in
+        "$TRIPLE"-*) OBJDUMP=$TRIPLE-objdump ;;
+        *)           OBJDUMP=objdump ;;
+    esac
+    if command -v "$OBJDUMP" >/dev/null 2>&1; then
+        HEAD=$("$OBJDUMP" -p "$OUT")
+        EXTRA=$(printf '%s\n' "$HEAD" | grep "DLL Name:" | grep -i "lib.*-[0-9]*\.dll" || true)
+        if [ -n "$EXTRA" ]; then
+            echo "Экзешник $ARCH зависит от библиотек, которых нет в Windows:" >&2
+            echo "$EXTRA" >&2
             exit 1
         fi
-    done
-    CHECKED="проверен: только системные DLL, ASLR, DEP, high-entropy VA"
-else
-    CHECKED="не проверен — нет $OBJDUMP"
-fi
+        for flag in DYNAMIC_BASE NX_COMPAT HIGH_ENTROPY_VA; do
+            if ! printf '%s\n' "$HEAD" | grep -q "$flag"; then
+                echo "В экзешнике $ARCH не включён $flag" >&2
+                exit 1
+            fi
+        done
+        CHECKED="проверен: только системные DLL, ASLR, DEP, high-entropy VA"
+    else
+        CHECKED="не проверен — нет $OBJDUMP"
+    fi
 
-# The exe carries Parson, whose MIT notice must travel with every copy.
-mkdir -p bin/licenses
-cp licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt bin/licenses/
+    # The exe carries Parson and puff, whose notices must travel with it.
+    mkdir -p "$BIN/licenses"
+    cp licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt "$BIN/licenses/"
 
-echo "Собрано: $OUT"
-echo "  лицензии:   bin/licenses/"
-echo "  компилятор: $CC ($TARGET)"
-echo "  экзешник:   $CHECKED"
-echo "  сборка:     $MODE_NAME"
-if [ -n "$CHARSET" ]; then
-    echo "  кодировки:  заданы явно"
-else
-    echo "  кодировки:  по умолчанию (компилятор без libiconv)"
-fi
+    echo "Собрано: $OUT (Utgard $VERSION)"
+    echo "  компилятор: $CC ($TARGET)"
+    echo "  экзешник:   $CHECKED"
+    echo "  сборка:     $MODE_NAME"
+    if [ -n "$CHARSET" ]; then
+        echo "  кодировки:  заданы явно"
+    else
+        echo "  кодировки:  по умолчанию (компилятор без libiconv)"
+    fi
+}
+
+# ---- which architectures ----------------------------------------------
+
+case "${ARCH:-both}" in
+    both)      ARCHES="x64 arm64"; CC_ONE=""; WINDRES_ONE="" ;;
+    x64|arm64) ARCHES=$ARCH; CC_ONE=${CC:-}; WINDRES_ONE=${WINDRES:-} ;;
+    *)         echo "ARCH=$ARCH не поддерживается: x64 или arm64 (без ARCH — обе)." >&2
+               exit 1 ;;
+esac
+
+for a in $ARCHES; do
+    build_arch "$a" "$1"
+done
