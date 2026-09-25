@@ -2,7 +2,7 @@
   <img src="image/banner.png" alt="Utgard Client [banner]" width="100%">
 </p>
 
-# Utgard v2.0.3
+# Utgard Client
 
 Utgard — приложение для маршрутизации выбранных сайтов и программ через VPN.
 
