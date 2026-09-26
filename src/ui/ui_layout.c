@@ -122,6 +122,14 @@ void layout(HWND hwnd)
         EnableWindow(g_prof_del, !g_sub_busy && profile_selected() >= 0);
         EnableWindow(g_prof_add, !g_sub_busy);
         EnableWindow(g_prof_sub, !g_sub_busy);
+        /* Profiles are switched by index and a subscription may renumber
+           them: while either runs, the list is not clickable and looks it.
+           The buttons are greyed with the rest below. */
+        {
+            BOOL idle = !g_busy && !g_sub_busy;
+            if ((EnableWindow(g_plist, idle) != 0) == (idle != 0))
+                InvalidateRect(g_plist, NULL, TRUE);
+        }
     }
 
     if (g_zap.valid) {
@@ -301,7 +309,7 @@ void layout(HWND hwnd)
             g_toggle, g_zap_start, g_zap_stop, g_zap_restart, g_zap_fix,
             g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts, g_pick_path, g_zap_list,
             g_h_save, g_h_tidy, g_h_back,
-            /* profiles are switched by index: the list stays as it is */
+            /* profiles are switched by index; the list itself is disabled above */
             g_prof_add, g_prof_del, g_prof_sub
         };
         size_t k;

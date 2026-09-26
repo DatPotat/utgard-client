@@ -4,19 +4,16 @@
 #include <stddef.h>
 #include <wchar.h>
 
-/* 1 while Windows has a network interface of that name that is actually
-   there - not one left behind as NotPresent. */
-int adapter_present(const wchar_t *alias);
-
-/* The LUID of that present interface, as NET_LUID.Value - a plain number,
+/* The LUID, as NET_LUID.Value, of the network interface of that name that
+   is actually there - not one left behind as NotPresent. A plain number,
    so this header needs no network headers (their union is named
    differently in mingw-w64 and llvm-mingw). */
 int adapter_luid(const wchar_t *alias, unsigned long long *luid_value);
 
-/* Wait until neither of Utgard's adapters exists any more, up to ms.
-   A process that exited or a service that was deleted does not mean its
-   Wintun adapter is gone: Windows removes it a little later. Creating the
-   next one before that is what this prevents. 1 when both are gone. */
-int adapters_wait_gone(unsigned long ms, wchar_t *msg, size_t cap);
+/* Start NetSetupSvc if it is stopped and wait until it runs (up to 15 s).
+   Needed before any Wintun adapter is created. 1 when running, or when its
+   state cannot even be read; 0 with msg when it is disabled or will not
+   start. The startup type is never touched. */
+int netsetup_ensure(wchar_t *msg, size_t cap);
 
 #endif

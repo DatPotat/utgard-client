@@ -404,7 +404,8 @@ void draw_profile(const DRAWITEMSTRUCT *d)
     int              icmp_silent;
     const profile_entry *e;
     RECT     r        = d->rcItem;
-    BOOL     selected = (d->itemState & ODS_SELECTED) != 0;
+    BOOL     locked   = !IsWindowEnabled(d->hwndItem);   /* a job is running */
+    BOOL     selected = (d->itemState & ODS_SELECTED) != 0 && !locked;
     int      active;
     wchar_t  right[128];
 
@@ -412,7 +413,7 @@ void draw_profile(const DRAWITEMSTRUCT *d)
     e = &g_prof.items[d->itemID];
     active = ((int)d->itemID == g_prof.active);
 
-    FillRect(d->hDC, &r, (selected || (int)d->itemID == list_hot_row(d->hwndItem))
+    FillRect(d->hDC, &r, (selected || (!locked && (int)d->itemID == list_hot_row(d->hwndItem)))
                              ? g_brush_line : g_brush_surface);
     if (active) {
         HBRUSH br = CreateSolidBrush(CLR_OK);
@@ -424,7 +425,7 @@ void draw_profile(const DRAWITEMSTRUCT *d)
         wchar_t title[288];
         to_wide(e->link.name[0] ? e->link.name : e->link.server, title, 288);
         text_at(d->hDC, r.left + S(12), r.top, r.right - r.left - S(150),
-                r.bottom - r.top, title, active ? CLR_OK : CLR_TEXT,
+                r.bottom - r.top, title, active ? CLR_OK : locked ? CLR_MUTED : CLR_TEXT,
                 g_font, DT_LEFT | DT_END_ELLIPSIS);
     }
 

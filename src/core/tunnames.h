@@ -1,8 +1,10 @@
 #ifndef UTGARD_TUNNAMES_H
 #define UTGARD_TUNNAMES_H
 
-/* The two network adapters Utgard brings up, by fixed names, so that they
-   can be waited for: a new one is created only once the old one is gone. */
+/* The two network adapters Utgard brings up, by fixed names. A leftover of
+   the same name is no obstacle: Wintun renames it out of the way ("name 1")
+   when it creates the new one, and sing-box's TUN, whose GUID is derived
+   from the name, takes over its own. */
 
 /* sing-box's TUN (interface_name in the generated config). */
 #define UTGARD_SB_TUN     "utgard-sing-box-tun"

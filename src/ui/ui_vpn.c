@@ -2,7 +2,6 @@
  * Utgard client - Profiles, subscription, ping, sing-box download, VPN on/off.
  */
 
-#include "tunnames.h"
 #include "adapter.h"
 #include "vpnswitch.h"
 #include "awgcore.h"
@@ -472,9 +471,6 @@ static int ensure_rule_set(long_job *j)
    for AmneziaWG the server address (system resolver, IPv4 as the TUN and
    the DNS strategy are) and the service's config, then sing-box's config,
    checked by sing-box itself. */
-/* How long an adapter of the previous connection may take to disappear. */
-#define ADAPTER_WAIT_MS 60000UL
-
 static int plan_prepare(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
 {
     const link_profile *p;
@@ -517,22 +513,12 @@ static int plan_prepare(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
     return singbox_check(v->plan[which].config, msg, cap);
 }
 
-/* The wait for the previous connection's adapters, said on the status line
-   only when there is something to wait for. */
-static int wait_adapters(long_job *j, wchar_t *msg, size_t cap)
-{
-    if (adapter_present(UTGARD_SB_TUN_W) || adapter_present(UTGARD_AWG_TUN_W))
-        job_stage(j, L"Ожидание удаления старого соединения…");
-    return adapters_wait_gone(ADAPTER_WAIT_MS, msg, cap);
-}
-
 /* Tunnel first, then sing-box: its config binds to the adapter the service
    raises. No tunnel is left without sing-box steering into it. */
 static int plan_up(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
 {
-    /* Nothing new while an adapter of the previous connection is still
-       there - also after a crash or an "off" that did not wait. */
-    if (!wait_adapters(v->job, msg, cap)) return 0;
+    /* Both the AmneziaWG service and sing-box create a Wintun adapter. */
+    if (!netsetup_ensure(msg, cap)) return 0;
     if (v->plan[which].awg) {
         job_stage(v->job, L"Включение туннеля AmneziaWG…");
         if (!awgsvc_start(v->plan[which].awg_conf, msg, cap)) return 0;
@@ -554,9 +540,6 @@ static int vpn_down(long_job *j, wchar_t *msg, size_t cap)
     ok = singbox_stop(msg, cap);
     if (awgsvc_running()) job_stage(j, L"Выключение туннеля AmneziaWG…");
     if (!awgsvc_stop(awg_msg, 200) && msg && !msg[0]) StringCchCopyW(msg, cap, awg_msg);
-    /* "Off" means the adapters are gone, not only the processes: a quick
-       "on" right after must find a clean system. */
-    if (ok && !wait_adapters(j, msg, cap)) ok = 0;
     return ok;
 }
 
