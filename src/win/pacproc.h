@@ -3,6 +3,7 @@
 
 #include <windows.h>
 #include "genconf.h"
+#include "pacstore.h"
 
 typedef struct {
     HANDLE process;
@@ -15,7 +16,7 @@ typedef struct {
 } pac_process;
 
 /* Start the restricted PAC worker and fill the PAC-related generator inputs. */
-int pacproc_prepare(pac_process *p, genconf_input *in,
+int pacproc_prepare(pac_process *p, genconf_input *in, const pac_store *store,
                     wchar_t *err, size_t cap);
 /* Put sing-box in the worker-owned kill-on-close job and hand its wait handle
    to the worker. On success the worker and sing-box no longer depend on UI. */

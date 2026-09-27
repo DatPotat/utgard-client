@@ -23,6 +23,8 @@ int main(void)
     input.store = &store;
     input.pac_port = 32101;
     input.pac_dns_port = 32102;
+    input.pac_dns_vpn_port = 32104;
+    input.pac_dns_sys_port = 32105;
     input.vpn_proxy_port = 32103;
     input.proxy_password = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     input.client_exe = "D:/Personal/utgard-client/bin/x64/utgard.exe";
@@ -37,6 +39,8 @@ int main(void)
     genconf_text_free(text);
     input.pac_port = 0;
     input.pac_dns_port = 0;
+    input.pac_dns_vpn_port = 0;
+    input.pac_dns_sys_port = 0;
     input.vpn_proxy_port = 0;
     input.proxy_password = NULL;
     input.client_exe = NULL;

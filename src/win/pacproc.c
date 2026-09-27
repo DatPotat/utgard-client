@@ -1,77 +1,131 @@
 #include "pacproc.h"
 #include "pacproto.h"
+#include <bcrypt.h>
 #include <sddl.h>
 #include <strsafe.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef UTGARD_PAC_HELPER_SHA
+#define UTGARD_PAC_HELPER_SHA ""
+#endif
 
 static SRWLOCK proxy_lock = SRWLOCK_INIT;
 static unsigned short current_port;
 static char current_password[65];
 
 static int say(wchar_t *err, size_t cap, const wchar_t *text)
-{
-    if (err && cap) StringCchCopyW(err, cap, text);
-    return 0;
-}
+{ if (err && cap) StringCchCopyW(err, cap, text); return 0; }
 
 static int read_all(HANDLE h, void *data, DWORD length)
 {
     BYTE *p = (BYTE *)data;
-    while (length) {
-        DWORD got = 0;
-        if (!ReadFile(h, p, length, &got, NULL) || !got) return 0;
-        p += got; length -= got;
-    }
+    while (length) { DWORD got = 0; if (!ReadFile(h, p, length, &got, NULL) || !got) return 0; p += got; length -= got; }
     return 1;
 }
-
 static int write_all(HANDLE h, const void *data, DWORD length)
 {
     const BYTE *p = (const BYTE *)data;
-    while (length) {
-        DWORD put = 0;
-        if (!WriteFile(h, p, length, &put, NULL) || !put) return 0;
-        p += put; length -= put;
-    }
+    while (length) { DWORD put = 0; if (!WriteFile(h, p, length, &put, NULL) || !put) return 0; p += put; length -= put; }
     return 1;
+}
+
+typedef struct { HANDLE pipe; pacproc_init init; const pac_store *store; volatile LONG ok; } send_context;
+static DWORD WINAPI send_scripts(void *opaque)
+{
+    send_context *context = (send_context *)opaque; int i;
+    if (!write_all(context->pipe, &context->init, sizeof context->init)) return 1;
+    for (i = 0; i < context->store->count; i++) if (context->store->items[i].enabled) {
+        size_t n = context->store->items[i].text ? strlen(context->store->items[i].text) : 0;
+        DWORD length;
+        if (!n || n > PAC_MAX || n > MAXDWORD) return 1;
+        length = (DWORD)n;
+        if (!write_all(context->pipe, &length, sizeof length) ||
+            !write_all(context->pipe, context->store->items[i].text, length)) return 1;
+    }
+    InterlockedExchange(&context->ok, 1); return 0;
 }
 
 static int helper_paths(wchar_t path[2048], wchar_t dir[2048], char utf8[2048])
 {
     wchar_t *slash;
     if (!GetModuleFileNameW(NULL, dir, 2048)) return 0;
-    slash = wcsrchr(dir, L'\\');
-    if (!slash) return 0;
-    slash[1] = L'\0';
+    slash = wcsrchr(dir, L'\\'); if (!slash) return 0; slash[1] = L'\0';
     if (FAILED(StringCchPrintfW(path, 2048, L"%sutgard-pac-helper.exe", dir)) ||
         GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES ||
         !WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8, 2048, NULL, NULL)) return 0;
     return 1;
 }
 
+static int file_sha256(const wchar_t *path, char hex[65])
+{
+    BCRYPT_ALG_HANDLE alg = NULL; BCRYPT_HASH_HANDLE hash = NULL; HANDLE file = INVALID_HANDLE_VALUE;
+    DWORD object_size = 0, got = 0, read = 0; PUCHAR object = NULL; BYTE digest[32], buffer[65536]; int ok = 0, i;
+    file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                       FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    if (file == INVALID_HANDLE_VALUE || BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) ||
+        BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&object_size, sizeof object_size, &got, 0)) goto done;
+    object = (PUCHAR)malloc(object_size); if (!object || BCryptCreateHash(alg, &hash, object, object_size, NULL, 0, 0)) goto done;
+    do {
+        if (!ReadFile(file, buffer, sizeof buffer, &read, NULL)) goto done;
+        if (read && BCryptHashData(hash, buffer, read, 0)) goto done;
+    } while (read);
+    if (BCryptFinishHash(hash, digest, sizeof digest, 0)) goto done;
+    for (i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", digest[i]);
+    hex[64] = 0; ok = 1;
+done:
+    SecureZeroMemory(digest, sizeof digest); SecureZeroMemory(buffer, sizeof buffer);
+    if (hash) BCryptDestroyHash(hash); if (alg) BCryptCloseAlgorithmProvider(alg, 0);
+    free(object); if (file != INVALID_HANDLE_VALUE) CloseHandle(file); return ok;
+}
+
 static HANDLE restricted_token(void)
 {
-    HANDLE source = NULL, token = NULL;
-    PSID low = NULL;
-    TOKEN_MANDATORY_LABEL label;
+    HANDLE source = NULL, token = NULL; PSID low = NULL, admins = NULL;
+    TOKEN_MANDATORY_LABEL label; SID_AND_ATTRIBUTES disabled;
+    SID_IDENTIFIER_AUTHORITY nt = SECURITY_NT_AUTHORITY;
+    BYTE group_buffer[16384]; DWORD group_bytes = 0, disable_count = 0, i;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE | TOKEN_QUERY |
                           TOKEN_ASSIGN_PRIMARY | TOKEN_ADJUST_DEFAULT, &source)) return NULL;
-    if (!CreateRestrictedToken(source, DISABLE_MAX_PRIVILEGE,
-                               0, NULL, 0, NULL, 0, NULL, &token)) goto done;
+    if (!AllocateAndInitializeSid(&nt, 2, SECURITY_BUILTIN_DOMAIN_RID,
+            DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &admins)) goto done;
+    disabled.Sid = admins; disabled.Attributes = 0;
+    if (GetTokenInformation(source, TokenGroups, group_buffer, sizeof group_buffer, &group_bytes)) {
+        TOKEN_GROUPS *groups = (TOKEN_GROUPS *)group_buffer;
+        for (i = 0; i < groups->GroupCount; i++)
+            if (EqualSid(groups->Groups[i].Sid, admins) &&
+                !(groups->Groups[i].Attributes & SE_GROUP_USE_FOR_DENY_ONLY)) {
+                disable_count = 1; break;
+            }
+    }
+    if (!CreateRestrictedToken(source, DISABLE_MAX_PRIVILEGE, disable_count,
+                               disable_count ? &disabled : NULL,
+                               0, NULL, 0, NULL, &token)) {
+        /* Test runners and managed launchers may already supply a restricted
+           primary token that Windows refuses to restrict a second time. The
+           helper still performs the same privilege/SID self-check. */
+        if (!IsTokenRestricted(source) ||
+            !DuplicateTokenEx(source, MAXIMUM_ALLOWED, NULL, SecurityImpersonation,
+                              TokenPrimary, &token)) goto done;
+    }
     if (!ConvertStringSidToSidW(L"S-1-16-4096", &low)) goto fail;
-    ZeroMemory(&label, sizeof label);
-    label.Label.Attributes = SE_GROUP_INTEGRITY;
-    label.Label.Sid = low;
-    if (!SetTokenInformation(token, TokenIntegrityLevel, &label,
-            sizeof label + GetLengthSid(low))) goto fail;
+    ZeroMemory(&label, sizeof label); label.Label.Attributes = SE_GROUP_INTEGRITY; label.Label.Sid = low;
+    if (!SetTokenInformation(token, TokenIntegrityLevel, &label, sizeof label + GetLengthSid(low))) goto fail;
 done:
-    LocalFree(low);
-    CloseHandle(source);
-    return token;
+    LocalFree(low); if (admins) FreeSid(admins); if (source) CloseHandle(source); return token;
 fail:
-    CloseHandle(token); token = NULL;
-    goto done;
+    CloseHandle(token); token = NULL; goto done;
+}
+
+static HANDLE create_status_file(const wchar_t *dir)
+{
+    wchar_t logs[2048], path[2048];
+    if (FAILED(StringCchPrintfW(logs, 2048, L"%slogs", dir)) ||
+        (!CreateDirectoryW(logs, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) ||
+        FAILED(StringCchPrintfW(path, 2048, L"%slogs\\pac-status.bin", dir))) return INVALID_HANDLE_VALUE;
+    return CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 }
 
 void pacproc_cancel(pac_process *p)
@@ -80,165 +134,119 @@ void pacproc_cancel(pac_process *p)
     if (p->command) { CloseHandle(p->command); p->command = NULL; }
     if (p->job) { CloseHandle(p->job); p->job = NULL; }
     if (p->process) {
-        if (WaitForSingleObject(p->process, 3000) == WAIT_TIMEOUT) {
-            TerminateProcess(p->process, 1);
-            WaitForSingleObject(p->process, 3000);
-        }
+        if (WaitForSingleObject(p->process, 3000) == WAIT_TIMEOUT) { TerminateProcess(p->process, 1); WaitForSingleObject(p->process, 3000); }
         CloseHandle(p->process); p->process = NULL;
     }
-    SecureZeroMemory(p->password, sizeof p->password);
-    p->prepared = 0;
+    SecureZeroMemory(p->password, sizeof p->password); p->prepared = 0;
 }
 
-int pacproc_prepare(pac_process *p, genconf_input *in, wchar_t *err, size_t cap)
+int pacproc_prepare(pac_process *p, genconf_input *in, const pac_store *store, wchar_t *err, size_t cap)
 {
-    SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE };
-    STARTUPINFOEXW si;
-    PROCESS_INFORMATION pi;
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit;
-    HANDLE ready_rd = NULL, ready_wr = NULL, command_rd = NULL, command_wr = NULL;
-    HANDLE token = NULL;
-    HANDLE inherit[3];
-    SIZE_T bytes = 0;
-    LPPROC_THREAD_ATTRIBUTE_LIST attrs = NULL;
-    wchar_t path[2048], dir[2048], cmd[4096];
-    pacproc_ready ready;
-    BOOL started = FALSE;
-
-    if (!p || !in) return say(err, cap, L"Внутренняя ошибка запуска PAC");
-    ZeroMemory(p, sizeof *p);
-    ZeroMemory(&ready, sizeof ready);
-    if (!helper_paths(path, dir, p->helper_path))
-        return say(err, cap, L"Не найден utgard-pac-helper.exe рядом с Utgard");
-    if (!CreatePipe(&ready_rd, &ready_wr, &sa, 0) ||
-        !CreatePipe(&command_rd, &command_wr, &sa, 0))
-        goto fail;
-    SetHandleInformation(ready_rd, HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(command_wr, HANDLE_FLAG_INHERIT, 0);
-
-    p->job = CreateJobObjectW(NULL, NULL);
-    ZeroMemory(&limit, sizeof limit);
+    SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE }; STARTUPINFOEXW si; PROCESS_INFORMATION pi;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit; HANDLE ready_rd = NULL, ready_wr = NULL, command_rd = NULL, command_wr = NULL;
+    HANDLE token = NULL, status = INVALID_HANDLE_VALUE, remote_status = NULL; HANDLE inherit[2];
+    SIZE_T bytes = 0; LPPROC_THREAD_ATTRIBUTE_LIST attrs = NULL; wchar_t path[2048], dir[2048], cmd[4096];
+    pacproc_ready ready; pacproc_init init; BOOL started = FALSE; char actual_sha[65]; int i, count = 0;
+    send_context sender; HANDLE send_thread = NULL;
+    if (!p || !in || !store) return say(err, cap, L"Внутренняя ошибка запуска PAC");
+    ZeroMemory(p, sizeof *p); ZeroMemory(&ready, sizeof ready);
+    if (!helper_paths(path, dir, p->helper_path)) return say(err, cap, L"Не найден utgard-pac-helper.exe рядом с Utgard");
+    if (!UTGARD_PAC_HELPER_SHA[0] || !file_sha256(path, actual_sha) || _stricmp(actual_sha, UTGARD_PAC_HELPER_SHA))
+        return say(err, cap, L"Контрольная сумма utgard-pac-helper.exe не совпадает со сборкой Utgard");
+    for (i = 0; i < store->count; i++) if (store->items[i].enabled) {
+        size_t length = store->items[i].text ? strlen(store->items[i].text) : 0;
+        if (!length || length > PAC_MAX) return say(err, cap, L"PAC-лист пуст или превышает допустимый размер");
+        count++;
+    }
+    if (!count || count > PAC_ITEMS_MAX) return say(err, cap, L"Нет корректных включённых PAC-листов");
+    if (!CreatePipe(&ready_rd, &ready_wr, &sa, 0) || !CreatePipe(&command_rd, &command_wr, &sa, 0)) goto fail;
+    SetHandleInformation(ready_rd, HANDLE_FLAG_INHERIT, 0); SetHandleInformation(command_wr, HANDLE_FLAG_INHERIT, 0);
+    p->job = CreateJobObjectW(NULL, NULL); ZeroMemory(&limit, sizeof limit);
     limit.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    if (!p->job || !SetInformationJobObject(p->job, JobObjectExtendedLimitInformation,
-                                             &limit, sizeof limit)) goto fail;
-    SetHandleInformation(p->job, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
-
-    InitializeProcThreadAttributeList(NULL, 1, 0, &bytes);
-    attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(bytes);
+    if (!p->job || !SetInformationJobObject(p->job, JobObjectExtendedLimitInformation, &limit, sizeof limit)) goto fail;
+    status = create_status_file(dir); if (status == INVALID_HANDLE_VALUE) { say(err, cap, L"Не удалось создать logs\\pac-status.bin"); goto fail; }
+    InitializeProcThreadAttributeList(NULL, 1, 0, &bytes); attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(bytes);
     if (!attrs || !InitializeProcThreadAttributeList(attrs, 1, 0, &bytes)) goto fail;
-    inherit[0] = ready_wr; inherit[1] = command_rd; inherit[2] = p->job;
-    if (!UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                                   inherit, sizeof inherit, NULL, NULL)) goto fail;
-    token = restricted_token();
-    if (!token) goto fail;
-    if (FAILED(StringCchPrintfW(cmd, 4096, L"\"%s\" %llu %llu %llu", path,
-            (unsigned long long)(UINT_PTR)ready_wr,
-            (unsigned long long)(UINT_PTR)command_rd,
-            (unsigned long long)(UINT_PTR)p->job))) goto fail;
-    ZeroMemory(&si, sizeof si); si.StartupInfo.cb = sizeof si; si.lpAttributeList = attrs;
-    ZeroMemory(&pi, sizeof pi);
+    inherit[0] = ready_wr; inherit[1] = command_rd;
+    if (!UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof inherit, NULL, NULL)) goto fail;
+    token = restricted_token(); if (!token) goto fail;
+    if (FAILED(StringCchPrintfW(cmd, 4096, L"\"%ls\" %llu %llu", path,
+            (unsigned long long)(UINT_PTR)ready_wr, (unsigned long long)(UINT_PTR)command_rd))) goto fail;
+    ZeroMemory(&si, sizeof si); si.StartupInfo.cb = sizeof si; si.lpAttributeList = attrs; ZeroMemory(&pi, sizeof pi);
     started = CreateProcessAsUserW(token, path, cmd, NULL, NULL, TRUE,
         CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, NULL, dir, &si.StartupInfo, &pi);
-    if (!started) {
-        DWORD code = GetLastError();
-        if (err && cap) StringCchPrintfW(err, cap,
-            L"Не удалось запустить ограниченный PAC-процесс (ошибка Windows %lu)",
-            (unsigned long)code);
-        goto fail;
-    }
-    p->process = pi.hProcess;
-    CloseHandle(pi.hThread);
-    CloseHandle(ready_wr); ready_wr = NULL;
-    CloseHandle(command_rd); command_rd = NULL;
+    if (!started) { if (err && cap) StringCchPrintfW(err, cap, L"Не удалось запустить ограниченный PAC-процесс (ошибка Windows %lu)", (unsigned long)GetLastError()); goto fail; }
+    p->process = pi.hProcess; CloseHandle(pi.hThread); CloseHandle(ready_wr); ready_wr = NULL; CloseHandle(command_rd); command_rd = NULL;
+    if (!DuplicateHandle(GetCurrentProcess(), status, p->process, &remote_status, GENERIC_WRITE, FALSE, 0)) goto fail;
+    CloseHandle(status); status = INVALID_HANDLE_VALUE;
+    init.magic = PACPROC_MAGIC; init.status_handle = (UINT_PTR)remote_status; init.script_count = (DWORD)count;
     {
-        int received = read_all(ready_rd, &ready, sizeof ready);
-        if (!received && WaitForSingleObject(p->process, 1000) == WAIT_OBJECT_0) {
-            DWORD exit_code = 0;
-            GetExitCodeProcess(p->process, &exit_code);
-            if (err && cap) StringCchPrintfW(err, cap,
-                L"Изолированный PAC-процесс завершился до запуска (код 0x%08lX)",
-                (unsigned long)exit_code);
-        }
-        if (!received || ready.magic != PACPROC_MAGIC ||
-            !ready.ok || ready.reserved != 3) {
-            if (ready.magic == PACPROC_MAGIC && ready.error[0]) say(err, cap, ready.error);
-            else if (ready.magic == PACPROC_MAGIC && ready.ok)
-                say(err, cap, L"PAC-процесс запущен без требуемых ограничений безопасности");
-            else if (!err || !cap || !err[0])
-                say(err, cap, L"Изолированный PAC-процесс не смог запуститься");
+        HANDLE waits[2]; DWORD waited; ULONGLONG deadline = GetTickCount64() + 15000; int received = 0;
+        ZeroMemory(&sender, sizeof sender); sender.pipe = command_wr; sender.init = init; sender.store = store;
+        send_thread = CreateThread(NULL, 0, send_scripts, &sender, 0, NULL);
+        if (!send_thread) goto fail;
+        waits[0] = send_thread; waits[1] = p->process;
+        waited = WaitForMultipleObjects(2, waits, FALSE, 15000);
+        if (waited != WAIT_OBJECT_0 || !InterlockedCompareExchange(&sender.ok, 0, 0)) {
+            if (waited == WAIT_TIMEOUT) CancelSynchronousIo(send_thread);
+            CloseHandle(command_wr); command_wr = NULL;
+            WaitForSingleObject(send_thread, 1000); CloseHandle(send_thread); send_thread = NULL;
+            TerminateProcess(p->process, 1);
+            say(err, cap, waited == WAIT_TIMEOUT ? L"Передача PAC не завершилась за 15 секунд" :
+                L"PAC-процесс завершился во время передачи настроек");
             goto fail;
         }
+        CloseHandle(send_thread); send_thread = NULL;
+        while (GetTickCount64() < deadline) {
+            DWORD available = 0;
+            if (WaitForSingleObject(p->process, 0) == WAIT_OBJECT_0) break;
+            if (!PeekNamedPipe(ready_rd, NULL, 0, NULL, &available, NULL)) break;
+            if (available >= sizeof ready) { received = read_all(ready_rd, &ready, sizeof ready); break; }
+            Sleep(20);
+        }
+        if (!received) { TerminateProcess(p->process, 1); say(err, cap, L"PAC-процесс не ответил за 15 секунд или завершился"); goto fail; }
     }
-    p->command = command_wr; command_wr = NULL;
-    p->proxy_port = ready.proxy_port;
+    if (ready.magic != PACPROC_MAGIC || !ready.ok || ready.security_state != 7) {
+        if (ready.magic == PACPROC_MAGIC && ready.error[0]) say(err, cap, ready.error);
+        else if (ready.magic == PACPROC_MAGIC && ready.ok) say(err, cap, L"PAC-процесс запущен без требуемых ограничений безопасности");
+        else say(err, cap, L"Изолированный PAC-процесс не смог запуститься");
+        goto fail;
+    }
+    p->command = command_wr; command_wr = NULL; p->proxy_port = ready.proxy_port;
     memcpy(p->password, ready.password, sizeof p->password);
-    in->pac_port = ready.pac_port;
-    in->pac_dns_port = ready.dns_port;
-    in->vpn_proxy_port = ready.proxy_port;
-    in->proxy_password = p->password;
-    in->client_exe = p->helper_path;
-    p->prepared = 1;
-    CloseHandle(ready_rd); CloseHandle(token);
-    DeleteProcThreadAttributeList(attrs); free(attrs);
-    return 1;
+    in->pac_port = ready.pac_port; in->pac_dns_port = ready.dns_port;
+    in->pac_dns_vpn_port = ready.dns_vpn_port; in->pac_dns_sys_port = ready.dns_sys_port;
+    in->vpn_proxy_port = ready.proxy_port; in->proxy_password = p->password; in->client_exe = p->helper_path; p->prepared = 1;
+    CloseHandle(ready_rd); CloseHandle(token); DeleteProcThreadAttributeList(attrs); free(attrs); return 1;
 fail:
-    if (ready_rd) CloseHandle(ready_rd);
-    if (ready_wr) CloseHandle(ready_wr);
-    if (command_rd) CloseHandle(command_rd);
-    if (command_wr) CloseHandle(command_wr);
-    if (token) CloseHandle(token);
-    if (attrs) { DeleteProcThreadAttributeList(attrs); free(attrs); }
-    pacproc_cancel(p);
-    if (err && cap && !err[0]) StringCchPrintfW(err, cap,
-        L"Не удалось запустить изолированный PAC-процесс (ошибка Windows %lu)",
-        (unsigned long)GetLastError());
+    if (send_thread) { CancelSynchronousIo(send_thread); WaitForSingleObject(send_thread, 1000); CloseHandle(send_thread); }
+    if (status != INVALID_HANDLE_VALUE) CloseHandle(status); if (ready_rd) CloseHandle(ready_rd); if (ready_wr) CloseHandle(ready_wr);
+    if (command_rd) CloseHandle(command_rd); if (command_wr) CloseHandle(command_wr); if (token) CloseHandle(token);
+    if (attrs) { DeleteProcThreadAttributeList(attrs); free(attrs); } pacproc_cancel(p);
+    if (err && cap && !err[0]) StringCchPrintfW(err, cap, L"Не удалось запустить изолированный PAC-процесс (ошибка Windows %lu)", (unsigned long)GetLastError());
     return 0;
 }
 
 int pacproc_attach(pac_process *p, HANDLE singbox, wchar_t *err, size_t cap)
 {
-    pacproc_command command;
-    HANDLE remote = NULL;
-    BOOL in_job = FALSE;
-    if (!p || !p->prepared || !p->process || !p->job || !singbox)
-        return say(err, cap, L"PAC-процесс не подготовлен");
-    if (!IsProcessInJob(singbox, p->job, &in_job) ||
-        (!in_job && !AssignProcessToJobObject(p->job, singbox)))
+    pacproc_command command; HANDLE remote_process = NULL, remote_job = NULL; BOOL in_job = FALSE;
+    if (!p || !p->prepared || !p->process || !p->job || !singbox) return say(err, cap, L"PAC-процесс не подготовлен");
+    if (!IsProcessInJob(singbox, p->job, &in_job) || (!in_job && !AssignProcessToJobObject(p->job, singbox)))
         return say(err, cap, L"Не удалось связать PAC-процесс с sing-box");
-    if (!DuplicateHandle(GetCurrentProcess(), singbox, p->process, &remote,
-                         SYNCHRONIZE, FALSE, 0))
+    if (!DuplicateHandle(GetCurrentProcess(), singbox, p->process, &remote_process, SYNCHRONIZE, FALSE, 0) ||
+        !DuplicateHandle(GetCurrentProcess(), p->job, p->process, &remote_job, SYNCHRONIZE, FALSE, 0))
         return say(err, cap, L"Не удалось передать PAC-процессу контроль sing-box");
-    command.magic = PACPROC_MAGIC;
-    command.process_handle = (UINT_PTR)remote;
-    if (!write_all(p->command, &command, sizeof command))
-        return say(err, cap, L"PAC-процесс завершился во время подключения");
-
-    AcquireSRWLockExclusive(&proxy_lock);
-    current_port = p->proxy_port;
-    memcpy(current_password, p->password, sizeof current_password);
-    ReleaseSRWLockExclusive(&proxy_lock);
-    CloseHandle(p->command); p->command = NULL;
-    CloseHandle(p->job); p->job = NULL;
-    CloseHandle(p->process); p->process = NULL;
-    SecureZeroMemory(p->password, sizeof p->password);
-    p->prepared = 0;
-    return 1;
+    command.magic = PACPROC_MAGIC; command.process_handle = (UINT_PTR)remote_process; command.job_handle = (UINT_PTR)remote_job;
+    if (!write_all(p->command, &command, sizeof command)) return say(err, cap, L"PAC-процесс завершился во время подключения");
+    AcquireSRWLockExclusive(&proxy_lock); current_port = p->proxy_port; memcpy(current_password, p->password, sizeof current_password); ReleaseSRWLockExclusive(&proxy_lock);
+    CloseHandle(p->command); p->command = NULL; CloseHandle(p->job); p->job = NULL; CloseHandle(p->process); p->process = NULL;
+    SecureZeroMemory(p->password, sizeof p->password); p->prepared = 0; return 1;
 }
 
 int pacproc_proxy(unsigned short *port, char password[65])
 {
-    int ok;
-    AcquireSRWLockShared(&proxy_lock);
-    ok = current_port != 0 && current_password[0] != '\0';
-    if (ok) { *port = current_port; memcpy(password, current_password, 65); }
-    ReleaseSRWLockShared(&proxy_lock);
-    return ok;
+    int ok; AcquireSRWLockShared(&proxy_lock); ok = current_port != 0 && current_password[0] != '\0';
+    if (ok) { *port = current_port; memcpy(password, current_password, 65); } ReleaseSRWLockShared(&proxy_lock); return ok;
 }
-
 void pacproc_proxy_clear(void)
-{
-    AcquireSRWLockExclusive(&proxy_lock);
-    current_port = 0;
-    SecureZeroMemory(current_password, sizeof current_password);
-    ReleaseSRWLockExclusive(&proxy_lock);
-}
+{ AcquireSRWLockExclusive(&proxy_lock); current_port = 0; SecureZeroMemory(current_password, sizeof current_password); ReleaseSRWLockExclusive(&proxy_lock); }

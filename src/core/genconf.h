@@ -37,6 +37,8 @@ typedef struct {
     const char  *awg_exe;        /* full path of amneziawg.exe */
     int          pac_port;       /* authenticated C PAC decision bridge */
     int          pac_dns_port;   /* observe real DNS answers for domain PAC */
+    int          pac_dns_vpn_port; /* direct inbound -> site-list DNS */
+    int          pac_dns_sys_port; /* direct inbound -> original dns.final */
     int          vpn_proxy_port; /* app-owned mixed inbound -> selector */
     const char  *proxy_password;
     const char  *client_exe;     /* relay's own sockets bypass the TUN */

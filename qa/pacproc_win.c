@@ -4,15 +4,6 @@
 #include "pacproc.h"
 #include "pacstore.h"
 
-static void cleanup(void)
-{
-    wchar_t path[1024], *slash;
-    if (GetModuleFileNameW(NULL, path, 1024) && (slash = wcsrchr(path, L'\\'))) {
-        wcscpy(slash + 1, L"pac.json");
-        DeleteFileW(path);
-    }
-}
-
 int main(void)
 {
     pac_process process;
@@ -28,16 +19,15 @@ int main(void)
     store.items[0].enabled = 1;
     wcscpy(store.items[0].source, L"C:\\rules\\qa.pac");
     store.items[0].text = "function FindProxyForURL(url, host) { return 'DIRECT'; }";
-    atexit(cleanup);
-    if (!pacstore_save(&store)) return 7;
     ZeroMemory(&input, sizeof input);
-    if (!pacproc_prepare(&process, &input, error, 512)) {
+    if (!pacproc_prepare(&process, &input, &store, error, 512)) {
         fwprintf(stderr, L"PAC helper: %ls\n", error);
         return 1;
     }
     printf("PAC helper: bridge=%d dns=%d selector=%d restricted process=ready\n",
            input.pac_port, input.pac_dns_port, input.vpn_proxy_port);
-    if (!input.pac_port || !input.pac_dns_port || !input.vpn_proxy_port ||
+    if (!input.pac_port || !input.pac_dns_port || !input.pac_dns_vpn_port ||
+        !input.pac_dns_sys_port || !input.vpn_proxy_port ||
         !input.proxy_password || !input.client_exe) {
         pacproc_cancel(&process);
         return 2;
