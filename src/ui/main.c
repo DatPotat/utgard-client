@@ -7,7 +7,6 @@
 #include "awgcore.h"
 #include "awgsvc.h"
 #include "ui.h"
-#include "pacbridge.h"
 
 /* ---- shared state: every module sees it through the externs in ui.h -- */
 
@@ -983,11 +982,6 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
 
     case WM_DESTROY:
-        if (pacbridge_active()) {
-            singbox_stop(NULL, 0);
-            pacbridge_disconnect();
-            awgsvc_stop(NULL, 0);
-        }
         tray_remove();
         KillTimer(hwnd, TIMER_STATUS);
         PostQuitMessage(0);

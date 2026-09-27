@@ -14,7 +14,7 @@
 #   clean         remove the build and output folders
 #
 # Output: bin/x64/ and bin/arm64/, each a complete product folder -
-# utgard.exe and licenses/ - ready to be packed into its own archive.
+# utgard.exe, utgard-pac-helper.exe and licenses/ - ready to be packed.
 # CC and WINDRES may be set in the environment to override detection
 # (only when building a single ARCH).
 
@@ -23,8 +23,9 @@ set -e
 # ---- what every architecture shares ---------------------------------
 
 SRC="$(ls src/core/*.c src/win/*.c src/ui/*.c | sort | tr '\n' ' ')vendor/parson/parson.c vendor/puff/puff.c"
+HELPER_SRC="src/helper/pac_helper.c src/win/pac.c src/win/pacbridge.c src/win/pacdns.c src/win/pacstore.c src/win/fileio.c vendor/parson/parson.c"
 RC="res/utgard.rc"
-NEED="src/version.h vendor/puff/puff.h $RC res/utgard.manifest.in res/utgard.ico res/utgard-tray-off.ico res/utgard-tray-on.ico licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt"
+NEED="src/version.h src/helper/pac_helper.c vendor/puff/puff.h $RC res/utgard.manifest.in res/pac-helper.rc res/pac-helper.manifest.in res/utgard.ico res/utgard-tray-off.ico res/utgard-tray-on.ico licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt"
 
 MISSING=""
 for f in $SRC $NEED; do
@@ -53,7 +54,7 @@ HARDEN="-fstack-protector-strong -static"
 INCLUDE="-Ivendor/parson -Ivendor/puff -Isrc -Isrc/core -Isrc/win -Isrc/ui"
 DEFS="-DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE"
 LINK="-municode -mwindows"
-LIBS="-lgdi32 -luser32 -ldwmapi -lole32 -luuid -lcrypt32 -lwinhttp -lws2_32 -liphlpapi -luxtheme -lbcrypt -lcomctl32 -loleaut32 -lshlwapi"
+LIBS="-lgdi32 -luser32 -ldwmapi -lole32 -luuid -lcrypt32 -lwinhttp -lws2_32 -liphlpapi -luxtheme -lbcrypt -lcomctl32 -loleaut32 -lshlwapi -ladvapi32"
 
 if [ "$1" = "debug" ]; then
     MODE="-g -O0"
@@ -74,6 +75,7 @@ build_arch() {
     BIN="bin/$ARCH"
     BUILD="build/$ARCH"
     OUT="$BIN/utgard.exe"
+    HELPER_OUT="$BIN/utgard-pac-helper.exe"
 
     if [ "$2" = "clean" ]; then
         rm -rf "$BUILD" "$BIN"
@@ -145,9 +147,13 @@ PROBE
     # The manifest carries the version as four numbers. The generated copy
     # sits in the build folder, found first through --include-dir.
     sed "s/@VERSION4@/$VERSION.0/" res/utgard.manifest.in > "$BUILD/utgard.manifest"
+    sed "s/@VERSION4@/$VERSION.0/" res/pac-helper.manifest.in > "$BUILD/pac-helper.manifest"
     "$WINDRES" -J rc --include-dir="$BUILD" --include-dir=res "$RC" -O coff -o "$BUILD/utgard.res"
+    "$WINDRES" -J rc --include-dir="$BUILD" --include-dir=res res/pac-helper.rc -O coff -o "$BUILD/pac-helper.res"
     # shellcheck disable=SC2086
     "$CC" $WARN $HARDEN $INCLUDE $DEFS $LINK $MODE $CHARSET $SRC "$BUILD/utgard.res" -o "$OUT" $LIBS
+    # shellcheck disable=SC2086
+    "$CC" $WARN $HARDEN $INCLUDE $DEFS $LINK $MODE $CHARSET $HELPER_SRC "$BUILD/pac-helper.res" -o "$HELPER_OUT" $LIBS
 
     # Check the executable itself, not the flags that were meant to produce
     # it: a gcc support DLL sneaking in as a dependency, or missing ASLR/DEP.
@@ -170,6 +176,19 @@ PROBE
             fi
         done
         CHECKED="проверен: только системные DLL, ASLR, DEP, high-entropy VA"
+        HELPER_HEAD=$("$OBJDUMP" -p "$HELPER_OUT")
+        EXTRA=$(printf '%s\n' "$HELPER_HEAD" | grep "DLL Name:" | grep -i "lib.*-[0-9]*\.dll" || true)
+        if [ -n "$EXTRA" ]; then
+            echo "PAC helper $ARCH зависит от библиотек, которых нет в Windows:" >&2
+            echo "$EXTRA" >&2
+            exit 1
+        fi
+        for flag in DYNAMIC_BASE NX_COMPAT HIGH_ENTROPY_VA; do
+            if ! printf '%s\n' "$HELPER_HEAD" | grep -q "$flag"; then
+                echo "В PAC helper $ARCH не включён $flag" >&2
+                exit 1
+            fi
+        done
     else
         CHECKED="не проверен — нет $OBJDUMP"
     fi
@@ -179,6 +198,7 @@ PROBE
     cp licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt "$BIN/licenses/"
 
     echo "Собрано: $OUT (Utgard $VERSION)"
+    echo "          $HELPER_OUT"
     echo "  компилятор: $CC ($TARGET)"
     echo "  экзешник:   $CHECKED"
     echo "  сборка:     $MODE_NAME"

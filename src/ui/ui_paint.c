@@ -4,7 +4,6 @@
 
 #include "coremanifest.h"
 #include "ui.h"
-#include "pacbridge.h"
 
 /* ---- painting ------------------------------------------------------- */
 
@@ -112,9 +111,9 @@ static void paint_pac(HDC dc, const RECT *c)
     text_at(dc, PAD, top + S(40), w, S(22),
             L"Активные правила объединяются: прокси в любом PAC означает выбранный VPN-профиль.",
             CLR_MUTED, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
-    if (pacbridge_active())
+    if (g_vpn_on && g_pac_count)
         StringCchPrintfW(status, 160, L"Используется PAC-листов: %d",
-                         pacbridge_count());
+                         g_pac_count);
     else if (g_vpn_on)
         StringCchPrintfW(status, 160, L"Включено PAC-листов: %d · PAC не используется",
                          g_pac_count);
@@ -122,7 +121,7 @@ static void paint_pac(HDC dc, const RECT *c)
         StringCchPrintfW(status, 160, L"Включено PAC-листов: %d · VPN выключен",
                          g_pac_count);
     text_at(dc, PAD + S(175), top + S(14), w - S(315), S(24), status,
-            pacbridge_active() ? CLR_OK : CLR_MUTED, g_font_small,
+            (g_vpn_on && g_pac_count) ? CLR_OK : CLR_MUTED, g_font_small,
             DT_RIGHT | DT_END_ELLIPSIS);
     fill(dc, 0, top + S(68), c->right, S(1), g_brush_line);
 }

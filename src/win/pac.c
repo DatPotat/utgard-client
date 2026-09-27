@@ -180,7 +180,11 @@ int pac_query(pac_script *p, const wchar_t *url, DWORD *error)
         } else {
             InterlockedIncrement(&q->refs);
             ZeroMemory(&options, sizeof options);
-            options.dwFlags = WINHTTP_AUTOPROXY_CONFIG_URL;
+            /* Never allow WinHTTP's documented in-process JScript fallback:
+               Utgard is elevated. If the AutoProxy service cannot evaluate
+               this PAC out of process, fail the query instead. */
+            options.dwFlags = WINHTTP_AUTOPROXY_CONFIG_URL |
+                              WINHTTP_AUTOPROXY_RUN_OUTPROCESS_ONLY;
             options.lpszAutoConfigUrl = p->url;
             options.fAutoLogonIfChallenged = FALSE;
             e = WinHttpGetProxyForUrlEx(resolver, url, &options, context);
