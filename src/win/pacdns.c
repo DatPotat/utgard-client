@@ -13,6 +13,7 @@ static struct { unsigned char ip[16]; int family; char name[256]; ULONGLONG unti
 static ULONGLONG serial;
 static SOCKADDR_STORAGE resolver;
 static int resolver_size, local_port;
+static SRWLOCK resolver_lock = SRWLOCK_INIT;
 static volatile LONG jobs;
 
 static unsigned get16(const unsigned char *p) { return ((unsigned)p[0] << 8) | p[1]; }
@@ -65,13 +66,17 @@ static void remember(const unsigned char *packet, int length)
         if ((type == 1 && bytes == 4) || (type == 28 && bytes == 16)) {
             AcquireSRWLockExclusive(&cache_lock);
             for (k = 0; k < 2048; k++) {
-                if ((cache[k].family == (int)bytes && !memcmp(cache[k].ip, packet + at, bytes)) || !cache[k].family) { slot = k; break; }
+                if ((cache[k].family == (int)bytes &&
+                     !memcmp(cache[k].ip, packet + at, bytes) &&
+                     !_stricmp(cache[k].name, name)) || !cache[k].family) {
+                    slot = k; break;
+                }
                 if (cache[k].serial < cache[slot].serial) slot = k;
             }
             memcpy(cache[slot].ip, packet + at, bytes);
             cache[slot].family = bytes;
             StringCchCopyA(cache[slot].name, 256, name);
-            cache[slot].until = GetTickCount64() + (ULONGLONG)(ttl > 3600 ? 3600 : ttl) * 1000;
+            cache[slot].until = GetTickCount64() + (ULONGLONG)ttl * 1000;
             cache[slot].serial = ++serial;
             ReleaseSRWLockExclusive(&cache_lock);
         }
@@ -79,15 +84,17 @@ static void remember(const unsigned char *packet, int length)
     }
 }
 
-int pacdns_name(const unsigned char *ip, int ipv6, char name[256])
+int pacdns_names(const unsigned char *ip, int ipv6,
+                 char names[][256], int max_names)
 {
     size_t i;
     int found = 0, bytes = ipv6 ? 16 : 4;
     ULONGLONG now = GetTickCount64();
     AcquireSRWLockShared(&cache_lock);
-    for (i = 0; i < 2048; i++) if (cache[i].family == bytes && cache[i].until > now && !memcmp(cache[i].ip, ip, bytes)) {
-        StringCchCopyA(name, 256, cache[i].name); found = 1; break;
-    }
+    for (i = 0; i < 2048 && found < max_names; i++)
+        if (cache[i].family == bytes && cache[i].until > now &&
+            !memcmp(cache[i].ip, ip, bytes))
+            StringCchCopyA(names[found++], 256, cache[i].name);
     ReleaseSRWLockShared(&cache_lock);
     return found;
 }
@@ -112,6 +119,8 @@ static DWORD WINAPI answer(void *arg)
     SOCKET upstream = INVALID_SOCKET;
     unsigned char prefix[2], id[2];
     int length = j->length;
+    SOCKADDR_STORAGE target;
+    int target_size;
     if (j->tcp) {
         timeouts(j->client);
         if (!io(j->client, prefix, 2, 0)) goto done;
@@ -120,7 +129,10 @@ static DWORD WINAPI answer(void *arg)
     }
     if (length < 12 || j->packet[2] & 0x80) goto done;
     memcpy(id, j->packet, 2);
-    upstream = socket(resolver.ss_family, j->tcp ? SOCK_STREAM : SOCK_DGRAM, 0);
+    AcquireSRWLockShared(&resolver_lock);
+    target = resolver; target_size = resolver_size;
+    ReleaseSRWLockShared(&resolver_lock);
+    upstream = socket(target.ss_family, j->tcp ? SOCK_STREAM : SOCK_DGRAM, 0);
     if (upstream == INVALID_SOCKET) goto done;
     timeouts(upstream);
     /* A TCP connect must be bounded independently of recv timeouts. */
@@ -130,7 +142,7 @@ static DWORD WINAPI answer(void *arg)
         struct timeval tv = { 3, 0 };
         int status, size = sizeof status;
         ioctlsocket(upstream, FIONBIO, &nonblock);
-        if (connect(upstream, (struct sockaddr *)&resolver, resolver_size) && WSAGetLastError() != WSAEWOULDBLOCK) goto done;
+        if (connect(upstream, (struct sockaddr *)&target, target_size) && WSAGetLastError() != WSAEWOULDBLOCK) goto done;
         FD_ZERO(&f); FD_SET(upstream, &f);
         if (select(0, NULL, &f, NULL, &tv) <= 0 || getsockopt(upstream, SOL_SOCKET, SO_ERROR, (char *)&status, &size) || status) goto done;
         nonblock = 0; ioctlsocket(upstream, FIONBIO, &nonblock);
@@ -173,7 +185,7 @@ static DWORD WINAPI accept_dns(void *arg)
             if (j->length < 12) { free(j); continue; }
         }
         if (j->client == INVALID_SOCKET) { free(j); break; }
-        if (InterlockedIncrement(&jobs) > 32) {
+        if (InterlockedIncrement(&jobs) > 512) {
             InterlockedDecrement(&jobs); if (j->tcp) closesocket(j->client); free(j); continue;
         }
         thread = CreateThread(NULL, 0, answer, j, 0, NULL);
@@ -191,8 +203,10 @@ int pacdns_start(int *port, wchar_t *err, size_t cap)
     ULONG metric = ULONG_MAX;
     SOCKET tcp = INVALID_SOCKET, udp = INVALID_SOCKET;
     struct sockaddr_in local;
+    SOCKADDR_STORAGE chosen;
+    int chosen_size = 0;
     int size = sizeof local, exclusive = 1, i;
-    if (local_port) { *port = local_port; return 1; }
+    ZeroMemory(&chosen, sizeof chosen);
     list = (IP_ADAPTER_ADDRESSES *)malloc(bytes);
     if (!list) goto fail;
     if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, NULL, list, &bytes) == ERROR_BUFFER_OVERFLOW) {
@@ -207,12 +221,16 @@ int pacdns_start(int *port, wchar_t *err, size_t cap)
         for (d = a->FirstDnsServerAddress; d; d = d->Next) {
             struct sockaddr_in *v4 = (struct sockaddr_in *)d->Address.lpSockaddr;
             if (v4->sin_family != AF_INET || (ntohl(v4->sin_addr.s_addr) >> 24) == 127 || !v4->sin_addr.s_addr || a->Ipv4Metric >= metric) continue;
-            memcpy(&resolver, v4, sizeof *v4); ((struct sockaddr_in *)&resolver)->sin_port = htons(53);
-            resolver_size = sizeof *v4; metric = a->Ipv4Metric;
+            memcpy(&chosen, v4, sizeof *v4); ((struct sockaddr_in *)&chosen)->sin_port = htons(53);
+            chosen_size = sizeof *v4; metric = a->Ipv4Metric;
         }
     }
     free(list);
-    if (!resolver_size) goto fail;
+    if (!chosen_size) goto fail;
+    AcquireSRWLockExclusive(&resolver_lock);
+    resolver = chosen; resolver_size = chosen_size;
+    ReleaseSRWLockExclusive(&resolver_lock);
+    if (local_port) { *port = local_port; return 1; }
     tcp = socket(AF_INET, SOCK_STREAM, 0); udp = socket(AF_INET, SOCK_DGRAM, 0);
     if (tcp == INVALID_SOCKET || udp == INVALID_SOCKET) goto fail;
     setsockopt(tcp, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&exclusive, sizeof exclusive);

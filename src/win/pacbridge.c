@@ -1,3 +1,4 @@
+#define FD_SETSIZE 1024
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include "pacbridge.h"
@@ -15,6 +16,48 @@ static SRWLOCK script_lock = SRWLOCK_INIT;
 static pac_script *current_scripts[PAC_ITEMS_MAX];
 static int current_count;
 static volatile LONG generation, workers, enabled;
+static SRWLOCK decision_lock = SRWLOCK_INIT;
+static struct {
+    wchar_t url[600];
+    LONG generation;
+    ULONGLONG until, serial;
+    int result;
+} decision_cache[512];
+static ULONGLONG decision_serial;
+
+static int cached_decision(const wchar_t *url, int *result)
+{
+    size_t i;
+    LONG gen = InterlockedCompareExchange(&generation, 0, 0);
+    ULONGLONG now = GetTickCount64();
+    int found = 0;
+    AcquireSRWLockShared(&decision_lock);
+    for (i = 0; i < 512; i++)
+        if (decision_cache[i].generation == gen && decision_cache[i].until > now &&
+            !wcscmp(decision_cache[i].url, url)) {
+            *result = decision_cache[i].result; found = 1; break;
+        }
+    ReleaseSRWLockShared(&decision_lock);
+    return found;
+}
+
+static void cache_decision(const wchar_t *url, int result)
+{
+    size_t i, slot = 0;
+    AcquireSRWLockExclusive(&decision_lock);
+    for (i = 0; i < 512; i++) {
+        if (!decision_cache[i].url[0] || !wcscmp(decision_cache[i].url, url)) {
+            slot = i; break;
+        }
+        if (decision_cache[i].serial < decision_cache[slot].serial) slot = i;
+    }
+    StringCchCopyW(decision_cache[slot].url, 600, url);
+    decision_cache[slot].generation = InterlockedCompareExchange(&generation, 0, 0);
+    decision_cache[slot].until = GetTickCount64() + 60000;
+    decision_cache[slot].serial = ++decision_serial;
+    decision_cache[slot].result = result;
+    ReleaseSRWLockExclusive(&decision_lock);
+}
 
 static int transfer(SOCKET s, void *data, int length, int writing)
 {
@@ -96,46 +139,64 @@ static int host_port(const unsigned char *p, int n, char *host, unsigned short *
     return *port != 0;
 }
 
-static int decision(const unsigned char *p, int n)
+static int decision(const unsigned char *p, int n, char proxy_host[256])
 {
-    char host[256];
+    char host[256], names[16][256];
     wchar_t url[600], wide[256];
     unsigned short port;
     DWORD error;
-    int result = 0, i, domain_known;
+    int result = 0, i, j, name_count = 0, mapped;
+    if (proxy_host) proxy_host[0] = 0;
     if (!host_port(p, n, host, &port)) return -1;
-    domain_known = p[0] == 3;
-    {
-        int mapped = p[0] != 3 && pacdns_name(p + 1, p[0] == 4, host);
-        if (mapped) domain_known = 1;
-        if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, host, -1, wide, 256)) return -1;
-        if (mapped) {
-            if (port == 80 || port == 443)
-                StringCchPrintfW(url, 600, L"%s://%s/", port == 443 ? L"https" : L"http", wide);
-            else StringCchPrintfW(url, 600, L"http://%s:%u/", wide, port);
-        } else {
-    if (port == 443 || port == 80)
-        StringCchPrintfW(url, 600, p[0] == 4 ? L"%s://[%s]/" : L"%s://%s/",
-                         port == 443 ? L"https" : L"http", wide);
-    else
-        StringCchPrintfW(url, 600, p[0] == 4 ? L"http://[%s]:%u/" : L"http://%s:%u/", wide, port);
-        }
+    if (p[0] == 3) {
+        StringCchCopyA(names[0], 256, host);
+        name_count = 1;
+    } else {
+        name_count = pacdns_names(p + 1, p[0] == 4, names, 16);
     }
+    mapped = name_count != 0;
+    if (!name_count) { StringCchCopyA(names[0], 256, host); name_count = 1; }
     AcquireSRWLockShared(&script_lock);
     if (!current_count) result = -1;
-    for (i = 0; i < current_count; i++) {
-        int one = pac_query(current_scripts[i], url, &error);
-        if (one < 0) { result = -1; break; }
-        if (one > 0) { result = 1; break; }
+    for (j = 0; result == 0 && j < name_count; j++) {
+        int domain = p[0] == 3 || mapped;
+        int one = 0;
+        if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                 names[j], -1, wide, 256)) { result = -1; break; }
+        if (port == 80 || port == 443)
+            StringCchPrintfW(url, 600,
+                !domain && p[0] == 4 ? L"%s://[%s]/" : L"%s://%s/",
+                port == 443 ? L"https" : L"http", wide);
+        else
+            StringCchPrintfW(url, 600,
+                !domain && p[0] == 4 ? L"http://[%s]:%u/" : L"http://%s:%u/",
+                wide, port);
+        if (cached_decision(url, &one)) {
+            result = one;
+        } else {
+            for (i = 0; i < current_count; i++) {
+                one = pac_query(current_scripts[i], url, &error);
+                if (one < 0) { result = -1; break; }
+                if (one > 0) { result = 1; break; }
+            }
+            if (result >= 0) cache_decision(url, result);
+        }
+        if (result > 0 && proxy_host && domain)
+            StringCchCopyA(proxy_host, 256, names[j]);
     }
-    /* Browsers may resolve through their own DoH connection. In that case
-       the TUN gives us only an address and a domain-based PAC would return
-       DIRECT for the address, silently bypassing its rule. Keep unknown web
-       destinations inside the selected profile; explicit site/app and local
-       network rules have already been handled before this catch-all. */
-    if (!result && !domain_known && (port == 80 || port == 443)) result = 1;
     ReleaseSRWLockShared(&script_lock);
     return result;
+}
+
+static int domain_address(const char *host, unsigned short port, unsigned char out[259])
+{
+    size_t length = host ? strlen(host) : 0;
+    if (!length || length > 255) return 0;
+    out[0] = 3; out[1] = (unsigned char)length;
+    memcpy(out + 2, host, length);
+    out[2 + length] = (unsigned char)(port >> 8);
+    out[3 + length] = (unsigned char)port;
+    return (int)length + 4;
 }
 
 static SOCKET connect_to(const unsigned char *p, int n, int type)
@@ -218,9 +279,7 @@ static void relay_tcp(SOCKET a, SOCKET b, LONG gen)
 {
     char buf[16384];
     int a_open = 1, b_open = 1;
-    ULONGLONG last = GetTickCount64();
-    while ((a_open || b_open) && gen == InterlockedCompareExchange(&generation, 0, 0) &&
-           GetTickCount64() - last < 300000) {
+    while ((a_open || b_open) && gen == InterlockedCompareExchange(&generation, 0, 0)) {
         fd_set f;
         struct timeval tv = { 1, 0 };
         int i;
@@ -232,7 +291,7 @@ static void relay_tcp(SOCKET a, SOCKET b, LONG gen)
                 int n = recv(from, buf, sizeof buf, 0);
                 if (n < 0) return;
                 if (!n) { if (i) b_open = 0; else a_open = 0; shutdown(to, SD_SEND); }
-                else { if (!transfer(to, buf, n, 1)) return; last = GetTickCount64(); }
+                else if (!transfer(to, buf, n, 1)) return;
             }
         }
     }
@@ -243,7 +302,8 @@ static void relay_tcp(SOCKET a, SOCKET b, LONG gen)
 typedef struct {
     SOCKET data, control;
     unsigned char addr[259];
-    int size, proxy;
+    unsigned char route[259];
+    int size, route_size, proxy;
     ULONGLONG last;
 } udp_peer;
 
@@ -256,7 +316,7 @@ static void udp_close(udp_peer *p)
 
 static void relay_udp(SOCKET control, LONG gen)
 {
-    udp_peer peers[32];
+    udp_peer peers[512];
     SOCKET incoming;
     unsigned short port;
     unsigned char reply[10] = { 5, 0, 0, 1, 127, 0, 0, 1, 0, 0 };
@@ -264,16 +324,16 @@ static void relay_udp(SOCKET control, LONG gen)
     struct sockaddr_in client;
     int have_client = 0, i;
     ULONGLONG last = GetTickCount64();
-    for (i = 0; i < 32; i++) { ZeroMemory(&peers[i], sizeof peers[i]); peers[i].data = peers[i].control = INVALID_SOCKET; }
+    for (i = 0; i < 512; i++) { ZeroMemory(&peers[i], sizeof peers[i]); peers[i].data = peers[i].control = INVALID_SOCKET; }
     incoming = loopback(SOCK_DGRAM, &port);
     if (incoming == INVALID_SOCKET || !packet) goto done;
     reply[8] = (unsigned char)(port >> 8); reply[9] = (unsigned char)port;
     if (!transfer(control, reply, sizeof reply, 1)) goto done;
-    while (gen == InterlockedCompareExchange(&generation, 0, 0) && GetTickCount64() - last < 120000) {
+    while (gen == InterlockedCompareExchange(&generation, 0, 0)) {
         fd_set f;
         struct timeval tv = { 1, 0 };
         FD_ZERO(&f); FD_SET(control, &f); FD_SET(incoming, &f);
-        for (i = 0; i < 32; i++) if (peers[i].data != INVALID_SOCKET) FD_SET(peers[i].data, &f);
+        for (i = 0; i < 512; i++) if (peers[i].data != INVALID_SOCKET) FD_SET(peers[i].data, &f);
         if (select(0, &f, NULL, NULL, &tv) <= 0) continue;
         if (FD_ISSET(control, &f)) break;
         if (FD_ISSET(incoming, &f)) {
@@ -286,14 +346,26 @@ static void relay_udp(SOCKET control, LONG gen)
             asize = address_size(packet + 3, n - 3);
             if (!asize) continue;
             if (!have_client) { client = from; have_client = 1; }
-            for (i = 0; i < 32; i++) if (peers[i].data != INVALID_SOCKET && peers[i].size == asize && !memcmp(peers[i].addr, packet + 3, asize)) { slot = i; break; }
+            for (i = 0; i < 512; i++) if (peers[i].data != INVALID_SOCKET && peers[i].size == asize && !memcmp(peers[i].addr, packet + 3, asize)) { slot = i; break; }
             if (slot < 0) {
                 unsigned char bound[259], any[7] = { 1, 0, 0, 0, 0, 0, 0 };
                 int bs;
                 slot = 0;
-                for (i = 0; i < 32; i++) if (peers[i].data == INVALID_SOCKET || peers[i].last < peers[slot].last) { slot = i; if (peers[i].data == INVALID_SOCKET) break; }
+                for (i = 0; i < 512; i++) if (peers[i].data == INVALID_SOCKET || peers[i].last < peers[slot].last) { slot = i; if (peers[i].data == INVALID_SOCKET) break; }
                 p = &peers[slot]; udp_close(p);
-                p->proxy = decision(packet + 3, asize);
+                {
+                    char proxy_host[256];
+                    char ignored[256];
+                    unsigned short target_port;
+                    p->proxy = decision(packet + 3, asize, proxy_host);
+                    p->route_size = asize;
+                    memcpy(p->route, packet + 3, asize);
+                    if (p->proxy > 0 && proxy_host[0] &&
+                        host_port(packet + 3, asize, ignored, &target_port)) {
+                        int routed = domain_address(proxy_host, target_port, p->route);
+                        if (routed) p->route_size = routed;
+                    }
+                }
                 if (p->proxy < 0) continue;
                 p->size = asize; memcpy(p->addr, packet + 3, asize);
                 if (p->proxy) {
@@ -307,11 +379,17 @@ static void relay_udp(SOCKET control, LONG gen)
                 if (p->data == INVALID_SOCKET) { udp_close(p); continue; }
             }
             p = &peers[slot];
-            if (p->proxy) send(p->data, (char *)packet, n, 0);
+            if (p->proxy) {
+                int payload = n - 3 - asize;
+                if (3 + p->route_size + payload > 65507) continue;
+                memmove(packet + 3 + p->route_size, packet + 3 + asize, payload);
+                memcpy(packet + 3, p->route, p->route_size);
+                send(p->data, (char *)packet, 3 + p->route_size + payload, 0);
+            }
             else send(p->data, (char *)packet + 3 + asize, n - 3 - asize, 0);
             p->last = last = GetTickCount64();
         }
-        for (i = 0; i < 32; i++) if (peers[i].data != INVALID_SOCKET && FD_ISSET(peers[i].data, &f)) {
+        for (i = 0; i < 512; i++) if (peers[i].data != INVALID_SOCKET && FD_ISSET(peers[i].data, &f)) {
             udp_peer *p = &peers[i];
             int offset = p->proxy ? 0 : 3 + p->size;
             int n = recv(p->data, (char *)packet + offset, 65507 - offset, 0);
@@ -322,7 +400,7 @@ static void relay_udp(SOCKET control, LONG gen)
         }
     }
 done:
-    for (i = 0; i < 32; i++) udp_close(&peers[i]);
+    for (i = 0; i < 512; i++) udp_close(&peers[i]);
     if (incoming != INVALID_SOCKET) closesocket(incoming);
     free(packet);
 }
@@ -334,7 +412,9 @@ static DWORD WINAPI client_thread(void *arg)
     SOCKET s = c->socket, remote = INVALID_SOCKET;
     LONG gen = c->gen;
     unsigned char header[3], addr[259], bound[259], reply[10] = { 5, 1, 0, 1, 127, 0, 0, 1, 0, 0 };
-    int n, which, bs;
+    int n, which, bs, target_n;
+    unsigned char target[259];
+    char proxy_host[256];
     free(c);
     timeout_socket(s);
     if (!authenticate(s) || !transfer(s, header, 3, 0) || header[0] != 5 || header[2]) goto done;
@@ -342,9 +422,18 @@ static DWORD WINAPI client_thread(void *arg)
     if (!n) goto done;
     if (header[1] == 3) { relay_udp(s, gen); goto done; }
     if (header[1] != 1) { reply[1] = 7; transfer(s, reply, sizeof reply, 1); goto done; }
-    which = decision(addr, n);
+    which = decision(addr, n, proxy_host);
+    target_n = n; memcpy(target, addr, n);
+    if (which == 1 && proxy_host[0]) {
+        char ignored[256];
+        unsigned short target_port;
+        if (host_port(addr, n, ignored, &target_port)) {
+            int routed = domain_address(proxy_host, target_port, target);
+            if (routed) target_n = routed;
+        }
+    }
     if (which == 0) remote = connect_to(addr, n, SOCK_STREAM);
-    else if (which == 1) remote = upstream(1, addr, n, bound, &bs);
+    else if (which == 1) remote = upstream(1, target, target_n, bound, &bs);
     if (remote != INVALID_SOCKET) reply[1] = 0;
     if (transfer(s, reply, sizeof reply, 1) && !reply[1]) relay_tcp(s, remote, gen);
 done:
@@ -362,7 +451,7 @@ static DWORD WINAPI accept_thread(void *unused)
         connection *c;
         HANDLE thread;
         if (s == INVALID_SOCKET) break;
-        if (InterlockedIncrement(&workers) > 128) { InterlockedDecrement(&workers); closesocket(s); continue; }
+        if (InterlockedIncrement(&workers) > 4096) { InterlockedDecrement(&workers); closesocket(s); continue; }
         c = (connection *)malloc(sizeof *c);
         if (!c) { InterlockedDecrement(&workers); closesocket(s); continue; }
         c->socket = s; c->gen = InterlockedCompareExchange(&generation, 0, 0);

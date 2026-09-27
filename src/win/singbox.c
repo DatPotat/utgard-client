@@ -649,7 +649,8 @@ int singbox_compile_list(wchar_t *msg, size_t cap)
 
 /* ---- start ---------------------------------------------------------- */
 
-int singbox_start(const char *config, wchar_t *msg, size_t cap)
+int singbox_start(const char *config, HANDLE job, HANDLE *process,
+                  wchar_t *msg, size_t cap)
 {
     SECURITY_ATTRIBUTES sa;
     PROCESS_INFORMATION pi;
@@ -662,6 +663,7 @@ int singbox_start(const char *config, wchar_t *msg, size_t cap)
     DWORD   waited;
 
     if (msg && cap) msg[0] = L'\0';
+    if (process) *process = NULL;
     if (singbox_running()) return 1;
 
     if (!singbox_exe(exe, MAX_PATH * 2) || !singbox_root(root, MAX_PATH * 2))
@@ -711,13 +713,23 @@ int singbox_start(const char *config, wchar_t *msg, size_t cap)
 
         /* A hidden console, not CREATE_NO_WINDOW: the window is what lets us
            ask the process to close later instead of killing it. */
-        started = spawn(cmd, 0, in_rd, diagnostic, diagnostic, &pi);
+        started = spawn(cmd, job ? CREATE_SUSPENDED : 0,
+                        in_rd, diagnostic, diagnostic, &pi);
         if (!started) {
             CloseHandle(diagnostic);
             CloseHandle(in_rd);
             CloseHandle(in_wr);
             coredir_release(&lk);
             return say(msg, cap, L"Не удалось запустить sing-box");
+        }
+        if (job && (!AssignProcessToJobObject(job, pi.hProcess) ||
+                    ResumeThread(pi.hThread) == (DWORD)-1)) {
+            TerminateProcess(pi.hProcess, 1);
+            WaitForSingleObject(pi.hProcess, 5000);
+            CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+            CloseHandle(diagnostic); CloseHandle(in_rd); CloseHandle(in_wr);
+            coredir_release(&lk);
+            return say(msg, cap, L"Не удалось включить аварийную остановку PAC");
         }
         stdin_feed(in_rd, in_wr, config);
 
@@ -749,8 +761,13 @@ int singbox_start(const char *config, wchar_t *msg, size_t cap)
     }
 
     CloseHandle(diagnostic);
+    if (singbox_running()) {
+        if (process) *process = pi.hProcess;
+        else CloseHandle(pi.hProcess);
+        return 1;
+    }
     CloseHandle(pi.hProcess);
-    return singbox_running() ? 1 : say(msg, cap, L"sing-box не запустился");
+    return say(msg, cap, L"sing-box не запустился");
 }
 
 /* ---- stop ----------------------------------------------------------- */
@@ -789,7 +806,8 @@ int singbox_stop(wchar_t *msg, size_t cap)
 
     p = open_ours(SYNCHRONIZE | PROCESS_TERMINATE);
     if (!p)
-        return singbox_running() ? say(msg, cap, L"Нет доступа к процессу sing-box") : 1;
+        return singbox_running() ? say(msg, cap, L"Нет доступа к процессу sing-box")
+                                 : 1;
 
     h.pid = GetProcessId(p);
     h.posted = 0;
@@ -812,7 +830,6 @@ int singbox_stop(wchar_t *msg, size_t cap)
         return say(msg, cap, L"sing-box не завершился");
     }
     CloseHandle(p);
-
     say(msg, cap, h.posted
         ? L"sing-box не закрылся сам за 12 секунд, его пришлось завершить принудительно"
         : L"У sing-box не найдено окно консоли, его пришлось завершить принудительно");

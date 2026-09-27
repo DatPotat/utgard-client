@@ -35,5 +35,17 @@ int main(void)
     fwrite(text, 1, strlen(text), file);
     fclose(file);
     genconf_text_free(text);
+    input.pac_port = 0;
+    input.pac_dns_port = 0;
+    input.vpn_proxy_port = 0;
+    input.proxy_password = NULL;
+    input.client_exe = NULL;
+    if (!genconf_build(&input, &text, error, sizeof error)) return 3;
+    if (strstr(text, "utgard-pac") || strstr(text, "utgard-vpn-proxy")) {
+        fprintf(stderr, "PAC fields leaked into a configuration without PAC\n");
+        genconf_text_free(text);
+        return 4;
+    }
+    genconf_text_free(text);
     return 0;
 }

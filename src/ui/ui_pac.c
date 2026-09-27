@@ -1,6 +1,6 @@
 #include "ui.h"
 #include "pacstore.h"
-#include "pacbridge.h"
+#include "pacproc.h"
 
 enum { PAC_OP_ADD = 1, PAC_OP_REFRESH, PAC_OP_TOGGLE, PAC_OP_DELETE, PAC_OP_ROUTE };
 
@@ -76,9 +76,13 @@ static int read_source(const pac_task *task, char **text, size_t *length,
     if (is_url(task->source)) {
         unsigned short port = 0;
         char password[65] = { 0 };
-        if (task->via_vpn &&
-            (!singbox_running() || !pacbridge_proxy(&port, password))) {
+        if (task->via_vpn && !singbox_running()) {
             StringCchCopyW(err, cap, L"Чтобы скачать PAC через VPN, сначала включите VPN");
+            return 0;
+        }
+        if (task->via_vpn && !pacproc_proxy(&port, password)) {
+            StringCchCopyW(err, cap,
+                L"Для загрузки PAC через VPN переподключите VPN с включённым PAC");
             return 0;
         }
         ok = net_fetch_pac(task->source, port, port ? password : NULL,
@@ -218,7 +222,10 @@ void pac_add_url(HWND hwnd)
     ZeroMemory(&task, sizeof task);
     task.op = PAC_OP_ADD;
     if (!ask_string(hwnd, L"PAC по URL", L"Адрес HTTP(S) файла PAC", L"", task.source, 2048)) return;
-    if (!is_url(task.source)) { problem(hwnd, L"Укажите URL с http:// или https://"); return; }
+    if (_wcsnicmp(task.source, L"https://", 8)) {
+        problem(hwnd, L"PAC по URL принимается только по HTTPS");
+        return;
+    }
     route = modal_box(hwnd,
         L"Как скачать PAC?\n\n«Да» — через активный VPN-профиль\n«Нет» — напрямую",
         L"Загрузка PAC", MB_YESNOCANCEL | MB_ICONQUESTION);

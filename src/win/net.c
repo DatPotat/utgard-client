@@ -78,7 +78,9 @@ static int fetch(const wchar_t *url, char **body, size_t *len,
     /* HTTPS only. A subscription carries server addresses and keys; fetched
        over plain HTTP it can be rewritten on the way and point every profile
        at someone else's server. */
-    if (uc.nScheme != INTERNET_SCHEME_HTTPS && !(pac && uc.nScheme == INTERNET_SCHEME_HTTP))
+    if (uc.nScheme != INTERNET_SCHEME_HTTPS &&
+        !(pac && uc.nScheme == INTERNET_SCHEME_HTTP &&
+          (!_wcsicmp(host, L"127.0.0.1") || !_wcsicmp(host, L"localhost"))))
         return fail(err, errcap, L"Подписка принимается только по https:// — "
                                  L"по http:// её можно подменить по дороге");
     if (FAILED(StringCchPrintfW(target, 4096, L"%s%s", path, extra)))
@@ -212,6 +214,20 @@ done:
 int net_fetch(const wchar_t *url, char **body, size_t *len, wchar_t *err, size_t cap)
 { return fetch(url, body, len, err, cap, 0, NULL, 0, 0, NULL); }
 
+static int pac_url_secure(const wchar_t *url)
+{
+    URL_COMPONENTS uc;
+    wchar_t host[256];
+    ZeroMemory(&uc, sizeof uc);
+    uc.dwStructSize = sizeof uc;
+    uc.lpszHostName = host;
+    uc.dwHostNameLength = 256;
+    if (!WinHttpCrackUrl(url, 0, 0, &uc)) return 0;
+    return uc.nScheme == INTERNET_SCHEME_HTTPS ||
+           (uc.nScheme == INTERNET_SCHEME_HTTP &&
+            (!_wcsicmp(host, L"127.0.0.1") || !_wcsicmp(host, L"localhost")));
+}
+
 int net_fetch_pac(const wchar_t *url, unsigned short proxy_port,
                   const char *proxy_password, char **body, size_t *len,
                   wchar_t *err, size_t cap)
@@ -221,6 +237,8 @@ int net_fetch_pac(const wchar_t *url, unsigned short proxy_port,
     if (!body || !len) return 0;
     *body = NULL; *len = 0;
     if (!url || FAILED(StringCchCopyW(current, 4096, url))) return fail(err, cap, L"Слишком длинный URL PAC");
+    if (!pac_url_secure(current))
+        return fail(err, cap, L"PAC по URL принимается только по HTTPS");
     for (i = 0; i < 6; i++) {
         DWORD count = 4096;
         int result = fetch(current, body, len, err, cap, 1, location,
@@ -228,6 +246,8 @@ int net_fetch_pac(const wchar_t *url, unsigned short proxy_port,
         if (result != 2) return result;
         if (FAILED(UrlCombineW(current, location, next, &count, 0)) ||
             FAILED(StringCchCopyW(current, 4096, next))) return fail(err, cap, L"Некорректное перенаправление PAC");
+        if (!pac_url_secure(current))
+            return fail(err, cap, L"PAC перенаправлен с HTTPS на небезопасный HTTP");
     }
     return fail(err, cap, L"Слишком много перенаправлений PAC");
 }
