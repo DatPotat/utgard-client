@@ -786,6 +786,18 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
             json_array_append_value(oarr, sv);
         }
     }
+    if (in->pac_port && in->proxy_password) {
+        JSON_Value *v = json_value_init_object();
+        JSON_Object *o = json_value_get_object(v);
+        json_object_set_string(o, "type", "socks");
+        json_object_set_string(o, "tag", "utgard-pac");
+        json_object_set_string(o, "server", "127.0.0.1");
+        json_object_set_number(o, "server_port", in->pac_port);
+        json_object_set_string(o, "version", "5");
+        json_object_set_string(o, "username", "utgard");
+        json_object_set_string(o, "password", in->proxy_password);
+        json_array_append_value(oarr, v);
+    }
     json_object_set_value(ro, "outbounds", outbounds);
 
     /* ---- rule set: ours, because we compile the list ---- */
@@ -808,6 +820,23 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
        rule that sends listed traffic into the selector ---- */
     route_rules = json_value_init_array();
     rarr = json_value_get_array(route_rules);
+
+    /* A PAC download or relay hop explicitly selects the active profile,
+       even for a private destination. It must precede process bypasses. */
+    if (in->vpn_proxy_port) {
+        JSON_Value *v = route_rule(SELECTOR_TAG);
+        JSON_Value *a = json_value_init_array();
+        json_array_append_string(json_value_get_array(a), "utgard-vpn-proxy");
+        json_object_set_value(json_value_get_object(v), "inbound", a);
+        json_array_append_value(rarr, v);
+    }
+    if (in->client_exe && in->vpn_proxy_port) {
+        JSON_Value *v = route_rule("direct");
+        JSON_Value *a = json_value_init_array();
+        json_array_append_string(json_value_get_array(a), in->client_exe);
+        json_object_set_value(json_value_get_object(v), "process_path", a);
+        json_array_append_value(rarr, v);
+    }
 
     /* The AmneziaWG service talks to its server itself; whatever it sends
        leaves directly, before any other rule can catch it. */
@@ -834,6 +863,15 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
         json_array_append_value(rarr, v);
     }
 
+    if (in->pac_port) {
+        JSON_Value *v = route_rule("utgard-pac");
+        JSON_Value *a = json_value_init_array();
+        json_array_append_string(json_value_get_array(a), "tcp");
+        json_array_append_string(json_value_get_array(a), "udp");
+        json_object_set_value(json_value_get_object(v), "network", a);
+        json_array_append_value(rarr, v);
+        if (dns) json_object_set_boolean(dns, "reverse_mapping", 1);
+    }
     json_object_set_value(route, "rules", route_rules);
 
     /* ---- dns: the bypass for server names, then the overlays, then the
@@ -886,6 +924,17 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
         json_object_set_value(dns, "rules", dns_rules);
     }
 
+    if (in->pac_port && in->pac_dns_port && dns) {
+        JSON_Value *v = json_value_init_object();
+        JSON_Object *o = json_value_get_object(v);
+        JSON_Array *servers = json_object_get_array(dns, "servers");
+        json_object_set_string(o, "type", "udp");
+        json_object_set_string(o, "tag", "utgard-pac-dns");
+        json_object_set_string(o, "server", "127.0.0.1");
+        json_object_set_number(o, "server_port", in->pac_dns_port);
+        if (servers) json_array_append_value(servers, v); else json_value_free(v);
+        json_object_set_string(dns, "final", "utgard-pac-dns");
+    }
     json_value_free(user_route_keep);
     json_value_free(user_dns_keep);
     free_overlays(ovl, novl);
@@ -1017,6 +1066,22 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
                 if (type && strcmp(type, "tun") == 0)
                     json_array_append_value(json_value_get_array(iv),
                                             json_value_deep_copy(json_array_get_value(oldin, k)));
+            }
+            /* Only this app-generated, loopback and authenticated listener
+               is allowed in addition to the user's TUN. */
+            if (in->vpn_proxy_port && in->proxy_password) {
+                JSON_Value *v = json_value_init_object(), *users = json_value_init_array();
+                JSON_Value *user = json_value_init_object();
+                JSON_Object *o = json_value_get_object(v);
+                json_object_set_string(o, "type", "mixed");
+                json_object_set_string(o, "tag", "utgard-vpn-proxy");
+                json_object_set_string(o, "listen", "127.0.0.1");
+                json_object_set_number(o, "listen_port", in->vpn_proxy_port);
+                json_object_set_string(json_value_get_object(user), "username", "utgard");
+                json_object_set_string(json_value_get_object(user), "password", in->proxy_password);
+                json_array_append_value(json_value_get_array(users), user);
+                json_object_set_value(o, "users", users);
+                json_array_append_value(json_value_get_array(iv), v);
             }
             json_object_set_value(co, "inbounds", iv);
         }

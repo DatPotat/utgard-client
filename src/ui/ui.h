@@ -69,6 +69,16 @@
 #define ID_ZAP_IPSET  409
 #define ID_ZAP_IPUPD  410
 #define ID_ZAP_HOSTS  411
+#define ID_PAC        412
+#define ID_PAC_LIST   1000
+#define ID_PAC_BACK   1001
+#define ID_PAC_FILE   1002
+#define ID_PAC_URL    1003
+#define ID_PAC_TOGGLE 1004
+#define ID_PAC_REFRESH 1005
+#define ID_PAC_DELETE 1006
+#define ID_PAC_HELP   1007
+#define ID_PAC_ROUTE  1008
 #define ID_APPS_LIST  501
 #define ID_APPS_BACK  502
 #define ID_APPS_PICK  503
@@ -145,7 +155,7 @@
 enum { BK_TAB = 0, BK_PRIMARY, BK_SECONDARY, BK_DANGER, BK_CHECK, BK_LINK };
 /* pages */
 enum { PAGE_UTGARD = 0, PAGE_ZAPRET, PAGE_APPS, PAGE_HOSTS, PAGE_PICK, PAGE_EDIT,
-       PAGE_SETTINGS };
+       PAGE_SETTINGS, PAGE_PAC };
 /* The list page serves two files: the VPN site list, compiled for sing-box,
    and zapret's own list-general-user.txt, which zapret reads as plain text. */
 enum { HOSTS_VPN = 0, HOSTS_ZAPRET };
@@ -231,7 +241,10 @@ extern int g_vpn_on;
 extern int g_installing;        /* 1 sing-box, 2 AmneziaWG being downloaded */
 extern int g_awg_lost;          /* VPN on, AmneziaWG profile, tunnel gone */
 extern int g_awg_ready;         /* the AmneziaWG core is downloaded and intact */
-extern HWND g_btn_hosts, g_btn_apps, g_zap_fix;
+extern HWND g_btn_hosts, g_btn_apps, g_btn_pac, g_zap_fix;
+extern HWND g_pac_list, g_pac_back, g_pac_file, g_pac_url, g_pac_toggle;
+extern HWND g_pac_refresh, g_pac_delete, g_pac_help;
+extern HWND g_pac_route;
 extern HWND g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts, g_tip;
 extern HWND g_alist, g_app_back, g_app_pick, g_app_manual;
 extern WNDPROC g_alist_prev;
@@ -374,6 +387,17 @@ void ed_open_new(HWND hwnd);
 void ed_remove(HWND *rows, int *count, int at);
 void ed_add(HWND hwnd, HWND *rows, int *count);
 void ed_save(HWND hwnd);
+
+/* ---- ui_pac.c ---- */
+enum { PAC_UI_REFRESH = 2, PAC_UI_TOGGLE, PAC_UI_DELETE, PAC_UI_ROUTE };
+int pac_selected(void);
+void pac_reload(void);
+void pac_open_page(HWND hwnd);
+void pac_back(HWND hwnd);
+void pac_add_file(HWND hwnd);
+void pac_add_url(HWND hwnd);
+void pac_action(HWND hwnd, int op);
+void pac_show_help(HWND hwnd);
 
 /* ---- ui_settings.c ---- */
 

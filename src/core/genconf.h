@@ -35,6 +35,11 @@ typedef struct {
     const char  *awg_interface;  /* adapter name; NULL: no AmneziaWG tunnel */
     const char  *awg_server_ip;  /* the IP literal the service connects to */
     const char  *awg_exe;        /* full path of amneziawg.exe */
+    int          pac_port;       /* authenticated C PAC decision bridge */
+    int          pac_dns_port;   /* observe real DNS answers for domain PAC */
+    int          vpn_proxy_port; /* app-owned mixed inbound -> selector */
+    const char  *proxy_password;
+    const char  *client_exe;     /* relay's own sockets bypass the TUN */
 } genconf_input;
 
 /* 1 on success, with the config in *out_text. It carries the server
