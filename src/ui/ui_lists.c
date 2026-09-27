@@ -3,6 +3,7 @@
  */
 
 #include "ui.h"
+#include "pacstore.h"
 
 static int ed_open_existing(HWND hwnd, const app_entry *e);
 
@@ -40,6 +41,17 @@ void lists_refresh_counts(void)
 
     g_host_count = 0;
     g_app_count  = 0;
+    g_pac_count  = 0;
+
+    {
+        pac_store store;
+        int i;
+        if (pacstore_load(&store)) {
+            for (i = 0; i < store.count; i++)
+                if (store.items[i].enabled) g_pac_count++;
+            pacstore_free(&store);
+        }
+    }
 
     if (root_file(L"list\\hosts", path, MAX_PATH * 2) &&
         file_read(path, buf, LIST_TEXT_MAX, NULL))
