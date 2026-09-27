@@ -52,14 +52,9 @@ static void paint_utgard(HDC dc, const RECT *c)
 
     {
         wchar_t line[256];
-        if (pacbridge_active())
-            StringCchPrintfW(line, 256,
-                L"Через туннель: %d сайтов, %d приложений и %d PAC-листов",
-                g_host_count, g_app_count, pacbridge_count());
-        else
-            StringCchPrintfW(line, 256,
-                L"Через туннель идут %d сайтов и %d приложений",
-                g_host_count, g_app_count);
+        StringCchPrintfW(line, 256,
+            L"Через туннель: %d сайтов, %d приложений и %d PAC-листов",
+            g_host_count, g_app_count, g_pac_count);
         text_at(dc, PAD, top + S(82), w, S(24), line,
                 CLR_TEXT, g_font, DT_LEFT | DT_END_ELLIPSIS);
     }
@@ -120,8 +115,12 @@ static void paint_pac(HDC dc, const RECT *c)
     if (pacbridge_active())
         StringCchPrintfW(status, 160, L"Используется PAC-листов: %d",
                          pacbridge_count());
+    else if (g_vpn_on)
+        StringCchPrintfW(status, 160, L"Включено PAC-листов: %d · PAC не используется",
+                         g_pac_count);
     else
-        StringCchCopyW(status, 160, L"PAC сейчас не используется");
+        StringCchPrintfW(status, 160, L"Включено PAC-листов: %d · VPN выключен",
+                         g_pac_count);
     text_at(dc, PAD + S(175), top + S(14), w - S(315), S(24), status,
             pacbridge_active() ? CLR_OK : CLR_MUTED, g_font_small,
             DT_RIGHT | DT_END_ELLIPSIS);

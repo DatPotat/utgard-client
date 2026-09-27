@@ -19,6 +19,7 @@ void pac_reload(void)
 {
     pac_store store;
     int i;
+    g_pac_count = 0;
     ListView_DeleteAllItems(g_pac_list);
     if (!pacstore_load(&store)) return;
     for (i = 0; i < store.count; i++) {
@@ -38,6 +39,7 @@ void pac_reload(void)
         StringCchPrintfW(state, 64, L"Готов · %lu КБ",
                          (unsigned long)((strlen(store.items[i].text) + 1023) / 1024));
         ListView_SetItemText(g_pac_list, i, 4, state);
+        if (store.items[i].enabled) g_pac_count++;
     }
     pacstore_free(&store);
 }

@@ -274,7 +274,7 @@ extern int g_exc_known, g_exc_present;
 extern int g_zap_dirty;
 extern int g_busy;
 extern const wchar_t *g_busy_text;
-extern int g_host_count, g_app_count;
+extern int g_host_count, g_app_count, g_pac_count;
 extern profile_store g_prof;
 extern HFONT g_font_mono;
 extern zapret_info g_zap;

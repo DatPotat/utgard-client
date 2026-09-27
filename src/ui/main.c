@@ -106,7 +106,7 @@ int            g_busy;        /* a background job is running */
 
 const wchar_t *g_busy_text;   /* what it is doing, for the status line */
 
-int  g_host_count, g_app_count;
+int  g_host_count, g_app_count, g_pac_count;
 
 profile_store g_prof;
 /* Set by WM_CREATE, reported once the window exists: a message box inside
