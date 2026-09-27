@@ -3,8 +3,10 @@
 #include <ws2tcpip.h>
 
 #include "net.h"
+#include "pac.h"
 
 #include <winhttp.h>
+#include <shlwapi.h>
 #include <iphlpapi.h>
 #include <icmpapi.h>
 #include <strsafe.h>
@@ -42,17 +44,21 @@ static int fail_code(wchar_t *err, size_t cap, const wchar_t *text, DWORD code)
     return 0;
 }
 
-int net_fetch(const wchar_t *url, char **body, size_t *len,
-              wchar_t *err, size_t errcap)
+static int fetch(const wchar_t *url, char **body, size_t *len,
+                 wchar_t *err, size_t errcap, int pac,
+                 wchar_t *redirect, DWORD redirect_bytes,
+                 unsigned short proxy_port, const char *proxy_password)
 {
     URL_COMPONENTS  uc;
     wchar_t         host[256];
-    wchar_t         path[2048];
+    wchar_t         path[2048], extra[2048], target[4096];
     HINTERNET       session = NULL, conn = NULL, req = NULL;
     DWORD           status = 0, status_len = sizeof status;
     char           *buf = NULL;
     size_t          total = 0;
     int             ok = 0;
+    size_t          limit = pac ? PAC_MAX : NET_BODY_MAX;
+    ULONGLONG       deadline = GetTickCount64() + 60000;
 
     if (!url || !body || !len) return fail(err, errcap, L"Пустой адрес");
     *body = NULL;
@@ -64,19 +70,33 @@ int net_fetch(const wchar_t *url, char **body, size_t *len,
     uc.dwHostNameLength = (DWORD)(sizeof host / sizeof host[0]);
     uc.lpszUrlPath      = path;
     uc.dwUrlPathLength  = (DWORD)(sizeof path / sizeof path[0]);
+    uc.lpszExtraInfo    = extra;
+    uc.dwExtraInfoLength = (DWORD)(sizeof extra / sizeof extra[0]);
 
     if (!WinHttpCrackUrl(url, 0, 0, &uc))
         return fail(err, errcap, L"Адрес не похож на ссылку https://");
     /* HTTPS only. A subscription carries server addresses and keys; fetched
        over plain HTTP it can be rewritten on the way and point every profile
        at someone else's server. */
-    if (uc.nScheme != INTERNET_SCHEME_HTTPS)
+    if (uc.nScheme != INTERNET_SCHEME_HTTPS &&
+        !(pac && uc.nScheme == INTERNET_SCHEME_HTTP &&
+          (!_wcsicmp(host, L"127.0.0.1") || !_wcsicmp(host, L"localhost"))))
         return fail(err, errcap, L"Подписка принимается только по https:// — "
                                  L"по http:// её можно подменить по дороге");
+    if (FAILED(StringCchPrintfW(target, 4096, L"%s%s", path, extra)))
+        return fail(err, errcap, L"Слишком длинный путь в URL");
 
-    session = WinHttpOpen(L"utgard/1.0",
-                          WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (proxy_port) {
+        wchar_t proxy[80];
+        StringCchPrintfW(proxy, 80, L"http://127.0.0.1:%u", proxy_port);
+        session = WinHttpOpen(L"utgard/1.0", WINHTTP_ACCESS_TYPE_NAMED_PROXY,
+                              proxy, WINHTTP_NO_PROXY_BYPASS, 0);
+    } else {
+        session = WinHttpOpen(L"utgard/1.0",
+                              pac ? WINHTTP_ACCESS_TYPE_NO_PROXY
+                                  : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                              WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    }
     if (!session) return fail_code(err, errcap, L"Не удалось открыть сетевую сессию",
                                    GetLastError());
 
@@ -88,12 +108,34 @@ int net_fetch(const wchar_t *url, char **body, size_t *len,
     if (!conn) { fail_code(err, errcap, L"Не удалось подключиться к серверу",
                            GetLastError()); goto done; }
 
-    req = WinHttpOpenRequest(conn, L"GET", path, NULL, WINHTTP_NO_REFERER,
+    req = WinHttpOpenRequest(conn, L"GET", target, NULL, WINHTTP_NO_REFERER,
                              WINHTTP_DEFAULT_ACCEPT_TYPES,
                              uc.nScheme == INTERNET_SCHEME_HTTPS
                                  ? WINHTTP_FLAG_SECURE : 0);
     if (!req) { fail_code(err, errcap, L"Не удалось создать запрос", GetLastError());
                 goto done; }
+    if (proxy_port) {
+        wchar_t password[65];
+        if (!proxy_password ||
+            !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, proxy_password,
+                                 -1, password, 65) ||
+            !WinHttpSetOption(req, WINHTTP_OPTION_PROXY_USERNAME,
+                              (LPVOID)L"utgard", 7 * sizeof(wchar_t)) ||
+            !WinHttpSetOption(req, WINHTTP_OPTION_PROXY_PASSWORD,
+                              password, (DWORD)((wcslen(password) + 1) * sizeof(wchar_t)))) {
+            SecureZeroMemory(password, sizeof password);
+            fail(err, errcap, L"Не удалось настроить доступ к VPN для загрузки PAC");
+            goto done;
+        }
+        SecureZeroMemory(password, sizeof password);
+    }
+    if (pac) {
+        DWORD disable = WINHTTP_DISABLE_REDIRECTS;
+        if (!WinHttpSetOption(req, WINHTTP_OPTION_DISABLE_FEATURE, &disable, sizeof disable)) {
+            fail_code(err, errcap, L"Не удалось настроить проверку перенаправлений", GetLastError());
+            goto done;
+        }
+    }
 
     if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                             WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
@@ -112,17 +154,28 @@ int net_fetch(const wchar_t *url, char **body, size_t *len,
         fail_code(err, errcap, L"Не удалось прочитать ответ", GetLastError());
         goto done;
     }
+    if (pac && redirect && (status == 301 || status == 302 || status == 303 || status == 307 || status == 308)) {
+        if (WinHttpQueryHeaders(req, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX,
+                                redirect, &redirect_bytes, WINHTTP_NO_HEADER_INDEX)) ok = 2;
+        else fail(err, errcap, L"Некорректное перенаправление PAC");
+        goto done;
+    }
     if (status != 200) {
         if (err && errcap)
             StringCchPrintfW(err, errcap, L"Сервер ответил кодом %lu", (unsigned long)status);
         goto done;
     }
 
-    buf = (char *)malloc(NET_BODY_MAX + 1);
+    buf = (char *)malloc(limit + 1);
     if (!buf) { fail(err, errcap, L"Не хватило памяти"); goto done; }
 
     for (;;) {
         DWORD avail = 0, got = 0;
+
+        if (GetTickCount64() > deadline) {
+            fail(err, errcap, L"Превышено время загрузки");
+            goto done;
+        }
 
         if (!WinHttpQueryDataAvailable(req, &avail)) {
             fail_code(err, errcap, L"Обрыв при чтении ответа", GetLastError());
@@ -130,8 +183,8 @@ int net_fetch(const wchar_t *url, char **body, size_t *len,
         }
         if (avail == 0) break;
 
-        if (total + avail > NET_BODY_MAX) {
-            fail(err, errcap, L"Ответ подписки слишком большой");
+        if (total + avail > limit) {
+            fail(err, errcap, pac ? L"PAC больше 4 МиБ" : L"Ответ подписки слишком большой");
             goto done;
         }
         if (!WinHttpReadData(req, buf + total, avail, &got)) {
@@ -156,6 +209,47 @@ done:
     if (conn) WinHttpCloseHandle(conn);
     if (session) WinHttpCloseHandle(session);
     return ok;
+}
+
+int net_fetch(const wchar_t *url, char **body, size_t *len, wchar_t *err, size_t cap)
+{ return fetch(url, body, len, err, cap, 0, NULL, 0, 0, NULL); }
+
+static int pac_url_secure(const wchar_t *url)
+{
+    URL_COMPONENTS uc;
+    wchar_t host[256];
+    ZeroMemory(&uc, sizeof uc);
+    uc.dwStructSize = sizeof uc;
+    uc.lpszHostName = host;
+    uc.dwHostNameLength = 256;
+    if (!WinHttpCrackUrl(url, 0, 0, &uc)) return 0;
+    return uc.nScheme == INTERNET_SCHEME_HTTPS ||
+           (uc.nScheme == INTERNET_SCHEME_HTTP &&
+            (!_wcsicmp(host, L"127.0.0.1") || !_wcsicmp(host, L"localhost")));
+}
+
+int net_fetch_pac(const wchar_t *url, unsigned short proxy_port,
+                  const char *proxy_password, char **body, size_t *len,
+                  wchar_t *err, size_t cap)
+{
+    wchar_t current[4096], location[4096], next[4096];
+    int i;
+    if (!body || !len) return 0;
+    *body = NULL; *len = 0;
+    if (!url || FAILED(StringCchCopyW(current, 4096, url))) return fail(err, cap, L"Слишком длинный URL PAC");
+    if (!pac_url_secure(current))
+        return fail(err, cap, L"PAC по URL принимается только по HTTPS");
+    for (i = 0; i < 6; i++) {
+        DWORD count = 4096;
+        int result = fetch(current, body, len, err, cap, 1, location,
+                           sizeof location, proxy_port, proxy_password);
+        if (result != 2) return result;
+        if (FAILED(UrlCombineW(current, location, next, &count, 0)) ||
+            FAILED(StringCchCopyW(current, 4096, next))) return fail(err, cap, L"Некорректное перенаправление PAC");
+        if (!pac_url_secure(current))
+            return fail(err, cap, L"PAC перенаправлен с HTTPS на небезопасный HTTP");
+    }
+    return fail(err, cap, L"Слишком много перенаправлений PAC");
 }
 
 int net_download(const wchar_t *url, const wchar_t *path,

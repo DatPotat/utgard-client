@@ -64,8 +64,11 @@ int singbox_check(const char *config, wchar_t *msg, size_t cap);
 int singbox_compile_list(wchar_t *msg, size_t cap);
 
 /* Start it and confirm it is still alive a moment later: a config that sing-box
-   accepts can still die on startup, typically over the TUN adapter. */
-int singbox_start(const char *config, wchar_t *msg, size_t cap);
+   accepts can still die on startup, typically over the TUN adapter. A supplied
+   job receives the process before its first instruction runs. When process is
+   non-NULL, ownership of the synchronization handle is returned. */
+int singbox_start(const char *config, HANDLE job, HANDLE *process,
+                  wchar_t *msg, size_t cap);
 
 /* Ask it to close before killing it: a hard kill leaves the TUN adapter and
    its routes behind. */

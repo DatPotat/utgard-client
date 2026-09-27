@@ -6,6 +6,7 @@
 #include "shellopen.h"
 #include "awgcore.h"
 #include "awgsvc.h"
+#include "pacstore.h"
 #include "ui.h"
 
 /* ---- shared state: every module sees it through the externs in ui.h -- */
@@ -42,7 +43,9 @@ int g_awg_ready;
 int g_switch_pending = -1;
 int g_switch_note;
 
-HWND g_btn_hosts, g_btn_apps, g_zap_fix;
+HWND g_btn_hosts, g_btn_apps, g_btn_pac, g_zap_fix;
+HWND g_pac_list, g_pac_back, g_pac_file, g_pac_url, g_pac_toggle;
+HWND g_pac_refresh, g_pac_delete, g_pac_help, g_pac_route;
 
 HWND g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts, g_tip;
 
@@ -103,7 +106,9 @@ int            g_busy;        /* a background job is running */
 
 const wchar_t *g_busy_text;   /* what it is doing, for the status line */
 
-int  g_host_count, g_app_count;
+int  g_host_count, g_app_count, g_pac_count;
+pac_status_record g_pac_status;
+int g_pac_status_valid;
 
 profile_store g_prof;
 /* Set by WM_CREATE, reported once the window exists: a message box inside
@@ -116,6 +121,22 @@ HFONT g_font_mono;
 zapret_info   g_zap;
 
 zapret_status g_status;
+
+static void pac_unreadable_notice(HWND hwnd)
+{
+    wchar_t aside[MAX_PATH * 2], text[MAX_PATH * 2 + 400];
+    const wchar_t *name;
+    if (!pacstore_unreadable_notice(aside, MAX_PATH * 2)) return;
+    name = wcsrchr(aside, L'\\');
+    if (aside[0])
+        StringCchPrintfW(text, sizeof text / sizeof text[0],
+            L"Не удалось прочитать pac.json. Файл не удалён: он переименован в %s рядом с utgard.exe. Настройки PAC начаты заново.",
+            name ? name + 1 : aside);
+    else
+        StringCchCopyW(text, sizeof text / sizeof text[0],
+            L"Не удалось прочитать pac.json и переименовать его. Чтобы не потерять файл, настройки PAC не будут сохраняться до перезапуска Utgard.");
+    problem(hwnd, text);
+}
 
 int     g_count;
 
@@ -247,6 +268,16 @@ static void set_fonts(void)
     SendMessageW(g_prof_del,   WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_prof_sub,   WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_btn_hosts,  WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_btn_pac,    WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_pac_list,   WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_pac_back,   WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_pac_file,   WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_pac_url,    WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_pac_toggle, WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_pac_refresh, WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_pac_delete, WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_pac_help,   WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_pac_route,  WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_alist,      WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_hedit,      WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_pk_search,  WM_SETFONT, (WPARAM)g_font, TRUE);
@@ -471,6 +502,38 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         g_h_save = make_button_on(hwnd, L"Сохранить", ID_HOSTS_SAVE, BK_PRIMARY, CLR_FOOTER);
         g_btn_hosts = make_button(hwnd, L"Список сайтов…", ID_EDIT_HOSTS, BK_SECONDARY);
         g_btn_apps  = make_button(hwnd, L"Приложения…", ID_EDIT_APPS, BK_SECONDARY);
+        g_btn_pac   = make_button(hwnd, L"PAC…", ID_PAC, BK_SECONDARY);
+        {
+            LVCOLUMNW column;
+            static const wchar_t *titles[] = { L"Включён", L"Источник", L"Тип", L"Загрузка", L"Состояние" };
+            static const int widths[] = { 70, 245, 60, 90, 110 };
+            int i;
+            INITCOMMONCONTROLSEX icc = { sizeof icc, ICC_LISTVIEW_CLASSES };
+            InitCommonControlsEx(&icc);
+            g_pac_list = CreateWindowExW(0, WC_LISTVIEWW, NULL,
+                WS_CHILD | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
+                0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_PAC_LIST,
+                (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE), NULL);
+            ListView_SetExtendedListViewStyle(g_pac_list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+            SetWindowTheme(g_pac_list, L"DarkMode_Explorer", NULL);
+            ListView_SetBkColor(g_pac_list, CLR_SURFACE);
+            ListView_SetTextBkColor(g_pac_list, CLR_SURFACE);
+            ListView_SetTextColor(g_pac_list, CLR_TEXT);
+            ZeroMemory(&column, sizeof column);
+            column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+            for (i = 0; i < 5; i++) {
+                column.iSubItem = i; column.pszText = (LPWSTR)titles[i]; column.cx = S(widths[i]);
+                ListView_InsertColumn(g_pac_list, i, &column);
+            }
+        }
+        g_pac_back = make_button_on(hwnd, L"Назад", ID_PAC_BACK, BK_SECONDARY, CLR_FOOTER);
+        g_pac_file = make_button_on(hwnd, L"Добавить файл…", ID_PAC_FILE, BK_PRIMARY, CLR_FOOTER);
+        g_pac_url = make_button_on(hwnd, L"Добавить URL…", ID_PAC_URL, BK_PRIMARY, CLR_FOOTER);
+        g_pac_toggle = make_button(hwnd, L"Включить / выключить", ID_PAC_TOGGLE, BK_SECONDARY);
+        g_pac_refresh = make_button(hwnd, L"Обновить", ID_PAC_REFRESH, BK_SECONDARY);
+        g_pac_route = make_button(hwnd, L"Напрямую / через VPN", ID_PAC_ROUTE, BK_SECONDARY);
+        g_pac_delete = make_button(hwnd, L"Удалить", ID_PAC_DELETE, BK_DANGER);
+        g_pac_help = make_button(hwnd, L"Как работает PAC", ID_PAC_HELP, BK_LINK);
         g_zap_start   = make_button_on(hwnd, L"Запустить", ID_ZAP_START,
                                        BK_PRIMARY, CLR_FOOTER);
         g_zap_stop    = make_button(hwnd, L"Выключить", ID_ZAP_STOP, BK_DANGER);
@@ -638,6 +701,15 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case ID_PROF_SUB:   act_subscription(hwnd); return 0;
         case ID_EDIT_HOSTS: act_edit_hosts(hwnd); return 0;
         case ID_EDIT_APPS:  act_edit_apps(hwnd); return 0;
+        case ID_PAC:        pac_open_page(hwnd); return 0;
+        case ID_PAC_BACK:   pac_back(hwnd); return 0;
+        case ID_PAC_FILE:   pac_add_file(hwnd); return 0;
+        case ID_PAC_URL:    pac_add_url(hwnd); return 0;
+        case ID_PAC_TOGGLE: pac_action(hwnd, PAC_UI_TOGGLE); return 0;
+        case ID_PAC_REFRESH: pac_action(hwnd, PAC_UI_REFRESH); return 0;
+        case ID_PAC_ROUTE:  pac_action(hwnd, PAC_UI_ROUTE); return 0;
+        case ID_PAC_DELETE: pac_action(hwnd, PAC_UI_DELETE); return 0;
+        case ID_PAC_HELP:   pac_show_help(hwnd); return 0;
 
         case ID_HOSTS_BACK: hosts_back(hwnd); return 0;
         case ID_HOSTS_TIDY: hosts_tidy(hwnd); return 0;
@@ -848,6 +920,17 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return TRUE;
     }
 
+    case WM_NOTIFY: {
+        NMHDR *h = (NMHDR *)lp;
+        if (h && h->idFrom == ID_PAC_LIST) {
+            if (h->code == LVN_ITEMCHANGED) layout(hwnd);
+            else if (h->code == NM_DBLCLK && pac_selected() >= 0)
+                pac_action(hwnd, PAC_UI_TOGGLE);
+            return 0;
+        }
+        break;
+    }
+
     case WM_CTLCOLOREDIT:
         SetTextColor((HDC)wp, CLR_TEXT);
         SetBkColor((HDC)wp, CLR_SURFACE);
@@ -872,6 +955,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         }
         if (wp != TIMER_STATUS) return 0;
+        pac_unreadable_notice(hwnd);
         if (g_page == PAGE_ZAPRET && g_zap.valid) {
             if (status_refresh()) {
                 InvalidateRect(hwnd, NULL, TRUE);
@@ -882,7 +966,18 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
            showing "on" after sing-box has died. */
         if (vpn_refresh()) {
             tray_set_state(g_vpn_on);
-            if (g_page == PAGE_UTGARD) layout(hwnd);
+            if (g_page == PAGE_UTGARD || g_page == PAGE_PAC) layout(hwnd);
+        }
+        {
+            pac_status_record pac_now;
+            int valid = g_vpn_on && pacstatus_read(&pac_now) &&
+                        pac_now.active_count > 0 && pacstatus_live(&pac_now);
+            if (valid != g_pac_status_valid ||
+                (valid && memcmp(&pac_now, &g_pac_status, sizeof pac_now))) {
+                g_pac_status_valid = valid;
+                if (valid) g_pac_status = pac_now;
+                if (g_page == PAGE_PAC) InvalidateRect(hwnd, NULL, TRUE);
+            }
         }
         /* An AmneziaWG tunnel with the VPN off is left over: stop it. */
         vpn_reap_orphan(hwnd);
@@ -987,6 +1082,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     if (cmdline && wcsstr(cmdline, L"--minimized")) show = SW_HIDE;
     ShowWindow(hwnd, show);
     UpdateWindow(hwnd);
+    pac_unreadable_notice(hwnd);
 
     if (g_prof_unreadable) {
         wchar_t        msg[MAX_PATH * 2 + 512];

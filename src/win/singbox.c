@@ -649,18 +649,21 @@ int singbox_compile_list(wchar_t *msg, size_t cap)
 
 /* ---- start ---------------------------------------------------------- */
 
-int singbox_start(const char *config, wchar_t *msg, size_t cap)
+int singbox_start(const char *config, HANDLE job, HANDLE *process,
+                  wchar_t *msg, size_t cap)
 {
     SECURITY_ATTRIBUTES sa;
     PROCESS_INFORMATION pi;
     wchar_t exe[MAX_PATH * 2];
     wchar_t root[MAX_PATH * 2];
     wchar_t logs[MAX_PATH * 2];
+    wchar_t startup[MAX_PATH * 2];
     wchar_t cmd[2048];
-    HANDLE  in_rd, in_wr = NULL, nul;
+    HANDLE  in_rd, in_wr = NULL, diagnostic = INVALID_HANDLE_VALUE;
     DWORD   waited;
 
     if (msg && cap) msg[0] = L'\0';
+    if (process) *process = NULL;
     if (singbox_running()) return 1;
 
     if (!singbox_exe(exe, MAX_PATH * 2) || !singbox_root(root, MAX_PATH * 2))
@@ -674,18 +677,23 @@ int singbox_start(const char *config, wchar_t *msg, size_t cap)
     if (FAILED(StringCchPrintfW(cmd, 2048, L"\"%s\" run -c stdin", exe)))
         return say(msg, cap, L"Слишком длинный путь");
 
-    /* Its output has nowhere useful to go: the config sends the log to
-       logs/sing-box.log, and a config error was already caught by check.
-       NUL rather than no handle, so writes simply succeed. */
+    /* The configured logger writes to logs/sing-box.log, but fatal startup
+       errors can happen before that logger exists. Keep stdout/stderr in a
+       temporary delete-on-close file so an early exit has a real diagnosis. */
     ZeroMemory(&sa, sizeof sa);
     sa.nLength = sizeof sa;
     sa.bInheritHandle = TRUE;
-    nul = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                      &sa, OPEN_EXISTING, 0, NULL);
-    if (nul == INVALID_HANDLE_VALUE) return say(msg, cap, L"Не удалось запустить sing-box");
+    if (FAILED(StringCchPrintfW(startup, MAX_PATH * 2, L"%s\\startup-%lu.tmp",
+                                logs, (unsigned long)GetCurrentProcessId())))
+        return say(msg, cap, L"Слишком длинный путь");
+    diagnostic = CreateFileW(startup, GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &sa, CREATE_ALWAYS,
+        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
+    if (diagnostic == INVALID_HANDLE_VALUE)
+        return say(msg, cap, L"Не удалось подготовить журнал запуска sing-box");
     in_rd = stdin_with(config, &in_wr);
     if (!in_rd) {
-        CloseHandle(nul);
+        CloseHandle(diagnostic);
         return say(msg, cap, L"Не удалось передать конфигурацию в sing-box");
     }
 
@@ -697,7 +705,7 @@ int singbox_start(const char *config, wchar_t *msg, size_t cap)
         BOOL    started;
 
         if (!coredir_hold_verified(&CORE_SINGBOX, &lk, msg, cap, NULL)) {
-            CloseHandle(nul);
+            CloseHandle(diagnostic);
             CloseHandle(in_rd);
             CloseHandle(in_wr);
             return 0;
@@ -705,13 +713,23 @@ int singbox_start(const char *config, wchar_t *msg, size_t cap)
 
         /* A hidden console, not CREATE_NO_WINDOW: the window is what lets us
            ask the process to close later instead of killing it. */
-        started = spawn(cmd, 0, in_rd, nul, nul, &pi);
-        CloseHandle(nul);
+        started = spawn(cmd, job ? CREATE_SUSPENDED : 0,
+                        in_rd, diagnostic, diagnostic, &pi);
         if (!started) {
+            CloseHandle(diagnostic);
             CloseHandle(in_rd);
             CloseHandle(in_wr);
             coredir_release(&lk);
             return say(msg, cap, L"Не удалось запустить sing-box");
+        }
+        if (job && (!AssignProcessToJobObject(job, pi.hProcess) ||
+                    ResumeThread(pi.hThread) == (DWORD)-1)) {
+            TerminateProcess(pi.hProcess, 1);
+            WaitForSingleObject(pi.hProcess, 5000);
+            CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+            CloseHandle(diagnostic); CloseHandle(in_rd); CloseHandle(in_wr);
+            coredir_release(&lk);
+            return say(msg, cap, L"Не удалось включить аварийную остановку PAC");
         }
         stdin_feed(in_rd, in_wr, config);
 
@@ -724,14 +742,32 @@ int singbox_start(const char *config, wchar_t *msg, size_t cap)
 
     if (waited == WAIT_OBJECT_0) {
         DWORD code = 0;
+        char output[8192];
+        DWORD got = 0;
         GetExitCodeProcess(pi.hProcess, &code);
+        SetFilePointer(diagnostic, 0, NULL, FILE_BEGIN);
+        ReadFile(diagnostic, output, sizeof output - 1, &got, NULL);
+        output[got] = '\0';
+        CloseHandle(diagnostic);
         CloseHandle(pi.hProcess);
+        if (output[0]) {
+            const wchar_t *f = friendly(output);
+            if (f) return say(msg, cap, f);
+            raw_first_line(output, msg, cap);
+            return 0;
+        }
         if (code == 0) return say(msg, cap, L"sing-box завершился сразу после запуска");
-        return say(msg, cap, L"sing-box не смог запуститься — смотрите журнал");
+        return say(msg, cap, L"sing-box не смог запуститься — смотрите журнал logs\\sing-box.log");
     }
 
+    CloseHandle(diagnostic);
+    if (singbox_running()) {
+        if (process) *process = pi.hProcess;
+        else CloseHandle(pi.hProcess);
+        return 1;
+    }
     CloseHandle(pi.hProcess);
-    return singbox_running() ? 1 : say(msg, cap, L"sing-box не запустился");
+    return say(msg, cap, L"sing-box не запустился");
 }
 
 /* ---- stop ----------------------------------------------------------- */
@@ -770,7 +806,8 @@ int singbox_stop(wchar_t *msg, size_t cap)
 
     p = open_ours(SYNCHRONIZE | PROCESS_TERMINATE);
     if (!p)
-        return singbox_running() ? say(msg, cap, L"Нет доступа к процессу sing-box") : 1;
+        return singbox_running() ? say(msg, cap, L"Нет доступа к процессу sing-box")
+                                 : 1;
 
     h.pid = GetProcessId(p);
     h.posted = 0;
@@ -793,7 +830,6 @@ int singbox_stop(wchar_t *msg, size_t cap)
         return say(msg, cap, L"sing-box не завершился");
     }
     CloseHandle(p);
-
     say(msg, cap, h.posted
         ? L"sing-box не закрылся сам за 12 секунд, его пришлось завершить принудительно"
         : L"У sing-box не найдено окно консоли, его пришлось завершить принудительно");
