@@ -9,6 +9,8 @@
 #include "awgsvc.h"
 #include "coredir.h"
 #include "ui.h"
+#include "pacstore.h"
+#include "pacproc.h"
 
 void profiles_reload(void)
 {
@@ -410,6 +412,7 @@ int vpn_refresh(void)
     int lost = now && active_is_awg() && !awgsvc_running();
 
     if (now == g_vpn_on && lost == g_awg_lost) return 0;
+    if (g_vpn_on && !now) pacproc_proxy_clear();
     g_vpn_on   = now;
     g_awg_lost = lost;
     return 1;
@@ -438,6 +441,8 @@ typedef struct {
         char  awg_ip[16];
         char  awg_conf[AWGCONF_MAX];
         char *config;                   /* sing-box's, from genconf */
+        pac_process pac;
+        int pac_count;
     } plan[2];
 } vpn_inputs;
 
@@ -506,6 +511,26 @@ static int plan_prepare(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
     }
     genconf_text_free(v->plan[which].config);
     v->plan[which].config = NULL;
+    {
+        pac_store settings;
+        int i;
+        if (!pacstore_load(&settings)) {
+            StringCchCopyW(msg, cap, L"Не удалось прочитать pac.json. Исправьте настройки PAC перед включением VPN.");
+            return 0;
+        }
+        for (i = 0; i < settings.count; i++)
+            if (settings.items[i].enabled) v->plan[which].pac_count++;
+        v->in.pac_port = v->in.pac_dns_port = v->in.pac_dns_vpn_port =
+            v->in.pac_dns_sys_port = v->in.vpn_proxy_port = 0;
+        v->in.proxy_password = NULL;
+        v->in.client_exe = NULL;
+        if (v->plan[which].pac_count &&
+            !pacproc_prepare(&v->plan[which].pac, &v->in, &settings, msg, cap)) {
+            pacstore_free(&settings);
+            return 0;
+        }
+        pacstore_free(&settings);
+    }
     if (!genconf_build(&v->in, &v->plan[which].config, err, sizeof err)) {
         to_wide(err, msg, (int)cap);
         return 0;
@@ -517,6 +542,12 @@ static int plan_prepare(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
    raises. No tunnel is left without sing-box steering into it. */
 static int plan_up(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
 {
+    HANDLE process = NULL;
+    if (v->plan[which].pac_count && singbox_running()) {
+        StringCchCopyW(msg, cap, L"sing-box уже запущен; PAC нельзя безопасно подключить к существующему процессу");
+        pacproc_cancel(&v->plan[which].pac);
+        return 0;
+    }
     /* Both the AmneziaWG service and sing-box create a Wintun adapter. */
     if (!netsetup_ensure(msg, cap)) return 0;
     if (v->plan[which].awg) {
@@ -524,7 +555,24 @@ static int plan_up(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
         if (!awgsvc_start(v->plan[which].awg_conf, msg, cap)) return 0;
     }
     job_stage(v->job, L"Включение VPN…");
-    if (singbox_start(v->plan[which].config, msg, cap)) return 1;
+    if (v->plan[which].pac_count &&
+        WaitForSingleObject(v->plan[which].pac.process, 0) != WAIT_TIMEOUT) {
+        StringCchCopyW(msg, cap, L"Изолированный PAC-процесс завершился до включения VPN");
+        pacproc_cancel(&v->plan[which].pac);
+    } else if (singbox_start(v->plan[which].config,
+                            v->plan[which].pac_count ? v->plan[which].pac.job : NULL,
+                            &process, msg, cap)) {
+        if (!v->plan[which].pac_count ||
+            pacproc_attach(&v->plan[which].pac, process, msg, cap)) {
+            CloseHandle(process);
+            return 1;
+        }
+        CloseHandle(process);
+        pacproc_cancel(&v->plan[which].pac);
+        singbox_stop(NULL, 0);
+    } else {
+        pacproc_cancel(&v->plan[which].pac);
+    }
     if (v->plan[which].awg) awgsvc_stop(NULL, 0);
     return 0;
 }
@@ -538,6 +586,7 @@ static int vpn_down(long_job *j, wchar_t *msg, size_t cap)
 
     job_stage(j, L"Выключение VPN…");
     ok = singbox_stop(msg, cap);
+    pacproc_proxy_clear();
     if (awgsvc_running()) job_stage(j, L"Выключение туннеля AmneziaWG…");
     if (!awgsvc_stop(awg_msg, 200) && msg && !msg[0]) StringCchCopyW(msg, cap, awg_msg);
     return ok;
@@ -549,6 +598,8 @@ static void plans_wipe(vpn_inputs *v)
     for (i = 0; i < 2; i++) {
         genconf_text_free(v->plan[i].config);
         v->plan[i].config = NULL;
+        pacproc_cancel(&v->plan[i].pac);
+        v->plan[i].pac_count = 0;
         awgconf_wipe(v->plan[i].awg_conf, sizeof v->plan[i].awg_conf);
     }
 }
@@ -631,14 +682,9 @@ static long_job *vpn_job(HWND hwnd, job_work work, int target)
         return NULL;
     }
 
-    /* Utgard sends only what is listed through the VPN: with neither sites
-       nor applications there is nothing to switch on for. */
+    /* Refresh the summary before preparing rules. Empty site/application
+       lists are valid when an enabled PAC supplies the routing decisions. */
     lists_refresh_counts();
-    if (g_host_count == 0 && g_app_count == 0) {
-        problem(hwnd, L"Через VPN пока нечего пускать. Добавьте сайты в «Список сайтов…» "
-                      L"или включите приложения в «Приложения…».");
-        return NULL;
-    }
     /* Only then the AmneziaWG core: no download for a switch-on that
        would be refused anyway. */
     if (link_is_awg(&g_prof.items[target].link) && !(g_awg_ready = awgcore_present())) {
