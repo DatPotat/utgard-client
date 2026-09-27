@@ -111,6 +111,9 @@ void layout(HWND hwnd)
         MoveWindow(g_btn_apps,  PAD + S(158), TABS_H + S(112), S(170), S(30), TRUE);
         ShowWindow(g_btn_hosts, on);
         ShowWindow(g_btn_apps,  on);
+        MoveWindow(g_btn_pac, PAD + S(336), TABS_H + S(112), S(82), S(30), TRUE);
+        ShowWindow(g_btn_pac, on);
+        EnableWindow(g_btn_pac, !g_busy && !g_sub_busy && !g_installing);
         MoveWindow(g_prof_add, PAD, c.bottom - FOOTER_H + S(4), S(176), S(30), TRUE);
         MoveWindow(g_prof_del, PAD + S(184), c.bottom - FOOTER_H + S(4), S(110), S(30), TRUE);
         MoveWindow(g_prof_sub, PAD + S(302), c.bottom - FOOTER_H + S(4), S(116), S(30), TRUE);
@@ -291,6 +294,44 @@ void layout(HWND hwnd)
     }
 
     {
+        int pp = (g_page == PAGE_PAC) ? SW_SHOW : SW_HIDE;
+        int selected = pp ? pac_selected() : -1;
+        wchar_t selected_type[16] = L"";
+        int table_top = TABS_H + S(78);
+        int actions_y = c.bottom - FOOTER_H - S(42);
+        int source_w = c.right - PAD * 2 - S(70 + 60 + 100 + 110) - GetSystemMetrics(SM_CXVSCROLL) - S(8);
+        HWND controls[] = { g_pac_list, g_pac_back, g_pac_file, g_pac_url,
+            g_pac_toggle, g_pac_refresh, g_pac_route, g_pac_delete, g_pac_help };
+        size_t i;
+        if (selected >= 0)
+            ListView_GetItemText(g_pac_list, selected, 2, selected_type, 16);
+        if (source_w < S(140)) source_w = S(140);
+        ListView_SetColumnWidth(g_pac_list, 0, S(70));
+        ListView_SetColumnWidth(g_pac_list, 1, source_w);
+        ListView_SetColumnWidth(g_pac_list, 2, S(60));
+        ListView_SetColumnWidth(g_pac_list, 3, S(100));
+        ListView_SetColumnWidth(g_pac_list, 4, S(110));
+        MoveWindow(g_pac_list, PAD, table_top, c.right - PAD * 2,
+                   actions_y - S(8) - table_top, TRUE);
+        MoveWindow(g_pac_toggle, PAD, actions_y, S(148), S(30), TRUE);
+        MoveWindow(g_pac_refresh, PAD + S(156), actions_y, S(94), S(30), TRUE);
+        MoveWindow(g_pac_route, PAD + S(258), actions_y, S(176), S(30), TRUE);
+        MoveWindow(g_pac_delete, c.right - PAD - S(86), actions_y, S(86), S(30), TRUE);
+        MoveWindow(g_pac_help, c.right - PAD - S(130), TABS_H + S(14), S(130), S(24), TRUE);
+        MoveWindow(g_pac_back, PAD, c.bottom - FOOTER_H + S(4), S(100), S(30), TRUE);
+        MoveWindow(g_pac_file, PAD + S(108), c.bottom - FOOTER_H + S(4), S(132), S(30), TRUE);
+        MoveWindow(g_pac_url, PAD + S(248), c.bottom - FOOTER_H + S(4), S(132), S(30), TRUE);
+        for (i = 0; i < sizeof controls / sizeof controls[0]; i++) ShowWindow(controls[i], pp);
+        EnableWindow(g_pac_toggle, selected >= 0 && !g_busy);
+        EnableWindow(g_pac_refresh, selected >= 0 && !g_busy);
+        EnableWindow(g_pac_route, selected >= 0 && !wcscmp(selected_type, L"URL") && !g_busy);
+        EnableWindow(g_pac_delete, selected >= 0 && !g_busy);
+        EnableWindow(g_pac_file, !g_busy);
+        EnableWindow(g_pac_url, !g_busy);
+        EnableWindow(g_pac_back, !g_busy);
+    }
+
+    {
         int on = (g_page == PAGE_ZAPRET && g_zap.valid) ? SW_SHOW : SW_HIDE;
         ShowWindow(g_list,        on);
         ShowWindow(g_zap_fix,     on);
@@ -309,6 +350,8 @@ void layout(HWND hwnd)
             g_toggle, g_zap_start, g_zap_stop, g_zap_restart, g_zap_fix,
             g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts, g_pick_path, g_zap_list,
             g_h_save, g_h_tidy, g_h_back,
+            g_pac_back, g_pac_file, g_pac_url, g_pac_toggle,
+            g_pac_refresh, g_pac_route, g_pac_delete,
             /* profiles are switched by index; the list itself is disabled above */
             g_prof_add, g_prof_del, g_prof_sub
         };

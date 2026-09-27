@@ -254,7 +254,7 @@ void draw_button(const DRAWITEMSTRUCT *d)
     if (kind == BK_TAB) {
         /* The applications page belongs to the Utgard tab. */
         BOOL active = (d->CtlID == ID_TAB_UTGARD &&
-                       (g_page == PAGE_UTGARD || g_page == PAGE_APPS ||
+                       (g_page == PAGE_UTGARD || g_page == PAGE_APPS || g_page == PAGE_PAC ||
                         (g_page == PAGE_HOSTS && g_hosts_mode == HOSTS_VPN) ||
                         g_page == PAGE_PICK || g_page == PAGE_EDIT)) ||
                       (d->CtlID == ID_TAB_ZAPRET &&

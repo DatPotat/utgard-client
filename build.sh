@@ -37,7 +37,7 @@ if [ -n "$MISSING" ]; then
 fi
 
 # The version lives in src/version.h only; the manifest is stamped from it.
-VERSION=$(sed -n 's/^#define UTGARD_VERSION "\([0-9]*\.[0-9]*\.[0-9]*\)"$/\1/p' src/version.h)
+VERSION=$(tr -d '\r' < src/version.h | sed -n 's/^#define UTGARD_VERSION "\([0-9]*\.[0-9]*\.[0-9]*\)"$/\1/p')
 if [ -z "$VERSION" ]; then
     echo "В src/version.h нет строки #define UTGARD_VERSION \"X.Y.Z\"." >&2
     exit 1
@@ -53,7 +53,7 @@ HARDEN="-fstack-protector-strong -static"
 INCLUDE="-Ivendor/parson -Ivendor/puff -Isrc -Isrc/core -Isrc/win -Isrc/ui"
 DEFS="-DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE"
 LINK="-municode -mwindows"
-LIBS="-lgdi32 -luser32 -ldwmapi -lole32 -luuid -lcrypt32 -lwinhttp -lws2_32 -liphlpapi -luxtheme -lbcrypt -lcomctl32 -loleaut32"
+LIBS="-lgdi32 -luser32 -ldwmapi -lole32 -luuid -lcrypt32 -lwinhttp -lws2_32 -liphlpapi -luxtheme -lbcrypt -lcomctl32 -loleaut32 -lshlwapi"
 
 if [ "$1" = "debug" ]; then
     MODE="-g -O0"
