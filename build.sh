@@ -23,7 +23,7 @@ set -e
 # ---- what every architecture shares ---------------------------------
 
 SRC="$(ls src/core/*.c src/win/*.c src/ui/*.c | sort | tr '\n' ' ')vendor/parson/parson.c vendor/puff/puff.c"
-HELPER_SRC="src/helper/pac_helper.c src/win/pac.c src/win/pacbridge.c src/win/pacdns.c src/win/pacstore.c src/win/fileio.c vendor/parson/parson.c"
+HELPER_SRC="src/helper/pac_helper.c src/core/pacguard.c src/core/paclogic.c src/core/pacrecord.c src/core/pacudp.c src/win/pac.c src/win/pacbridge.c src/win/pacdns.c src/win/pacstatus.c"
 RC="res/utgard.rc"
 NEED="src/version.h src/helper/pac_helper.c vendor/puff/puff.h $RC res/utgard.manifest.in res/pac-helper.rc res/pac-helper.manifest.in res/utgard.ico res/utgard-tray-off.ico res/utgard-tray-on.ico licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt"
 
@@ -151,9 +151,14 @@ PROBE
     "$WINDRES" -J rc --include-dir="$BUILD" --include-dir=res "$RC" -O coff -o "$BUILD/utgard.res"
     "$WINDRES" -J rc --include-dir="$BUILD" --include-dir=res res/pac-helper.rc -O coff -o "$BUILD/pac-helper.res"
     # shellcheck disable=SC2086
-    "$CC" $WARN $HARDEN $INCLUDE $DEFS $LINK $MODE $CHARSET $SRC "$BUILD/utgard.res" -o "$OUT" $LIBS
-    # shellcheck disable=SC2086
     "$CC" $WARN $HARDEN $INCLUDE $DEFS $LINK $MODE $CHARSET $HELPER_SRC "$BUILD/pac-helper.res" -o "$HELPER_OUT" $LIBS
+    if ! command -v sha256sum >/dev/null 2>&1; then
+        echo "Нет sha256sum — нельзя привязать PAC helper к основной программе." >&2
+        exit 1
+    fi
+    HELPER_SHA=$(sha256sum "$HELPER_OUT" | awk '{print $1}')
+    # shellcheck disable=SC2086
+    "$CC" $WARN $HARDEN $INCLUDE $DEFS -DUTGARD_PAC_HELPER_SHA=\"$HELPER_SHA\" $LINK $MODE $CHARSET $SRC "$BUILD/utgard.res" -o "$OUT" $LIBS
 
     # Check the executable itself, not the flags that were meant to produce
     # it: a gcc support DLL sneaking in as a dependency, or missing ASLR/DEP.

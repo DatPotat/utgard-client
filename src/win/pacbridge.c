@@ -3,6 +3,9 @@
 #include <ws2tcpip.h>
 #include "pacbridge.h"
 #include "pacdns.h"
+#include "pacstatus.h"
+#include "pacudp.h"
+#include "paclogic.h"
 #include <bcrypt.h>
 #include <strsafe.h>
 #include <stdio.h>
@@ -16,6 +19,7 @@ static SRWLOCK script_lock = SRWLOCK_INIT;
 static pac_script *current_scripts[PAC_ITEMS_MAX];
 static int current_count;
 static volatile LONG generation, workers, enabled;
+static volatile LONG decision_generation;
 static SRWLOCK decision_lock = SRWLOCK_INIT;
 static struct {
     wchar_t url[600];
@@ -28,7 +32,7 @@ static ULONGLONG decision_serial;
 static int cached_decision(const wchar_t *url, int *result)
 {
     size_t i;
-    LONG gen = InterlockedCompareExchange(&generation, 0, 0);
+    LONG gen = InterlockedCompareExchange(&decision_generation, 0, 0);
     ULONGLONG now = GetTickCount64();
     int found = 0;
     AcquireSRWLockShared(&decision_lock);
@@ -41,10 +45,14 @@ static int cached_decision(const wchar_t *url, int *result)
     return found;
 }
 
-static void cache_decision(const wchar_t *url, int result)
+static void cache_decision(const wchar_t *url, int result, LONG expected_generation)
 {
     size_t i, slot = 0;
     AcquireSRWLockExclusive(&decision_lock);
+    if (InterlockedCompareExchange(&decision_generation, 0, 0) != expected_generation) {
+        ReleaseSRWLockExclusive(&decision_lock);
+        return;
+    }
     for (i = 0; i < 512; i++) {
         if (!decision_cache[i].url[0] || !wcscmp(decision_cache[i].url, url)) {
             slot = i; break;
@@ -52,10 +60,29 @@ static void cache_decision(const wchar_t *url, int result)
         if (decision_cache[i].serial < decision_cache[slot].serial) slot = i;
     }
     StringCchCopyW(decision_cache[slot].url, 600, url);
-    decision_cache[slot].generation = InterlockedCompareExchange(&generation, 0, 0);
+    decision_cache[slot].generation = expected_generation;
     decision_cache[slot].until = GetTickCount64() + 60000;
     decision_cache[slot].serial = ++decision_serial;
     decision_cache[slot].result = result;
+    ReleaseSRWLockExclusive(&decision_lock);
+}
+
+typedef struct { const wchar_t *url; DWORD error; } script_context;
+static int script_evaluate(size_t index, void *opaque)
+{
+    script_context *context = (script_context *)opaque;
+    DWORD error = 0;
+    int result = pac_query(current_scripts[index], context->url, &error);
+    if (result < 0) context->error = error;
+    return result;
+}
+
+void pacbridge_flush_decisions(void)
+{
+    AcquireSRWLockExclusive(&decision_lock);
+    InterlockedIncrement(&decision_generation);
+    ZeroMemory(decision_cache, sizeof decision_cache);
+    decision_serial = 0;
     ReleaseSRWLockExclusive(&decision_lock);
 }
 
@@ -97,15 +124,30 @@ static SOCKET loopback(int type, unsigned short *port)
     return s;
 }
 
-/* Address block: ATYP, address, network-order port (RFC 1928). */
-static int address_size(const unsigned char *p, int n)
+static int loopback_pair_port(unsigned short *port)
 {
-    int k;
-    if (n < 1) return 0;
-    k = p[0] == 1 ? 7 : p[0] == 4 ? 19 : p[0] == 3 && n >= 2 && p[1] ? 4 + p[1] : 0;
-    return k && n >= k ? k : 0;
+    SOCKET tcp = INVALID_SOCKET, udp = INVALID_SOCKET;
+    struct sockaddr_in a;
+    int size = sizeof a, exclusive = 1;
+    tcp = socket(AF_INET, SOCK_STREAM, 0);
+    udp = socket(AF_INET, SOCK_DGRAM, 0);
+    if (tcp == INVALID_SOCKET || udp == INVALID_SOCKET) goto fail;
+    setsockopt(tcp, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&exclusive, sizeof exclusive);
+    setsockopt(udp, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&exclusive, sizeof exclusive);
+    ZeroMemory(&a, sizeof a); a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(tcp, (struct sockaddr *)&a, sizeof a) ||
+        getsockname(tcp, (struct sockaddr *)&a, &size) ||
+        bind(udp, (struct sockaddr *)&a, sizeof a)) goto fail;
+    *port = ntohs(a.sin_port);
+    closesocket(tcp); closesocket(udp);
+    return 1;
+fail:
+    if (tcp != INVALID_SOCKET) closesocket(tcp);
+    if (udp != INVALID_SOCKET) closesocket(udp);
+    return 0;
 }
 
+/* Address block: ATYP, address, network-order port (RFC 1928). */
 static int read_address(SOCKET s, unsigned char *p)
 {
     int rest;
@@ -121,7 +163,7 @@ static int read_address(SOCKET s, unsigned char *p)
 
 static int host_port(const unsigned char *p, int n, char *host, unsigned short *port)
 {
-    int k = address_size(p, n);
+    int k = pacudp_address_size(p, (size_t)n);
     if (!k) return 0;
     if (p[0] == 3) {
         int i;
@@ -139,53 +181,70 @@ static int host_port(const unsigned char *p, int n, char *host, unsigned short *
     return *port != 0;
 }
 
+static int evaluate_host(const char *host, unsigned short port, int domain)
+{
+    wchar_t url[600], wide[256];
+    script_context context;
+    int result = 0, failed = 0;
+    LONG cache_generation;
+    if (!host || !host[0] ||
+        !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, host, -1, wide, 256))
+        return 0;
+    if (port == 80 || port == 443)
+        StringCchPrintfW(url, 600,
+            !domain && strchr(host, ':') ? L"%s://[%s]/" : L"%s://%s/",
+            port == 443 ? L"https" : L"http", wide);
+    else
+        StringCchPrintfW(url, 600,
+            !domain && strchr(host, ':') ? L"http://[%s]:%u/" : L"http://%s:%u/",
+            wide, port);
+    if (cached_decision(url, &result)) return result;
+    cache_generation = InterlockedCompareExchange(&decision_generation, 0, 0);
+    context.url = url; context.error = 0;
+    AcquireSRWLockShared(&script_lock);
+    result = paclogic_any((size_t)current_count, script_evaluate, &context, &failed);
+    ReleaseSRWLockShared(&script_lock);
+    if (failed) pacstatus_evaluation_error(context.error);
+    if (!failed) cache_decision(url, result, cache_generation);
+    return result;
+}
+
+typedef struct { unsigned short port; } route_context;
+static int route_evaluate(const char *host, int domain, void *opaque)
+{ return evaluate_host(host, ((route_context *)opaque)->port, domain); }
+
+int pacbridge_decide_host(const char *host, unsigned short port)
+{
+    size_t i, length = host ? strlen(host) : 0;
+    if (!length || length > 253 || !port) return 0;
+    for (i = 0; i < length; i++) {
+        unsigned char c = (unsigned char)host[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))
+            return 0;
+    }
+    return evaluate_host(host, port, 1);
+}
+
 static int decision(const unsigned char *p, int n, char proxy_host[256])
 {
     char host[256], names[16][256];
-    wchar_t url[600], wide[256];
     unsigned short port;
-    DWORD error;
-    int result = 0, i, j, name_count = 0, mapped;
+    int name_count = 0;
+    route_context context;
+    paclogic_result result;
     if (proxy_host) proxy_host[0] = 0;
-    if (!host_port(p, n, host, &port)) return -1;
+    if (!host_port(p, n, host, &port)) return 0;
     if (p[0] == 3) {
         StringCchCopyA(names[0], 256, host);
         name_count = 1;
     } else {
         name_count = pacdns_names(p + 1, p[0] == 4, names, 16);
     }
-    mapped = name_count != 0;
-    if (!name_count) { StringCchCopyA(names[0], 256, host); name_count = 1; }
-    AcquireSRWLockShared(&script_lock);
-    if (!current_count) result = -1;
-    for (j = 0; result == 0 && j < name_count; j++) {
-        int domain = p[0] == 3 || mapped;
-        int one = 0;
-        if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-                                 names[j], -1, wide, 256)) { result = -1; break; }
-        if (port == 80 || port == 443)
-            StringCchPrintfW(url, 600,
-                !domain && p[0] == 4 ? L"%s://[%s]/" : L"%s://%s/",
-                port == 443 ? L"https" : L"http", wide);
-        else
-            StringCchPrintfW(url, 600,
-                !domain && p[0] == 4 ? L"http://[%s]:%u/" : L"http://%s:%u/",
-                wide, port);
-        if (cached_decision(url, &one)) {
-            result = one;
-        } else {
-            for (i = 0; i < current_count; i++) {
-                one = pac_query(current_scripts[i], url, &error);
-                if (one < 0) { result = -1; break; }
-                if (one > 0) { result = 1; break; }
-            }
-            if (result >= 0) cache_decision(url, result);
-        }
-        if (result > 0 && proxy_host && domain)
-            StringCchCopyA(proxy_host, 256, names[j]);
-    }
-    ReleaseSRWLockShared(&script_lock);
-    return result;
+    context.port = port;
+    result = paclogic_route(p[0] == 3, host, names, name_count, route_evaluate, &context);
+    if (result.rewrite && proxy_host) StringCchCopyA(proxy_host, 256, result.rewrite_host);
+    return result.vpn;
 }
 
 static int domain_address(const char *host, unsigned short port, unsigned char out[259])
@@ -279,19 +338,34 @@ static void relay_tcp(SOCKET a, SOCKET b, LONG gen)
 {
     char buf[16384];
     int a_open = 1, b_open = 1;
+    ULONGLONG half_closed = 0;
+    BOOL keepalive = TRUE;
+    setsockopt(a, SOL_SOCKET, SO_KEEPALIVE, (const char *)&keepalive, sizeof keepalive);
+    setsockopt(b, SOL_SOCKET, SO_KEEPALIVE, (const char *)&keepalive, sizeof keepalive);
     while ((a_open || b_open) && gen == InterlockedCompareExchange(&generation, 0, 0)) {
         fd_set f;
         struct timeval tv = { 1, 0 };
         int i;
         FD_ZERO(&f); if (a_open) FD_SET(a, &f); if (b_open) FD_SET(b, &f);
-        if (select(0, &f, NULL, NULL, &tv) <= 0) continue;
+        if (select(0, &f, NULL, NULL, &tv) <= 0) {
+            if ((!a_open || !b_open) && half_closed &&
+                GetTickCount64() - half_closed >= 60000) return;
+            continue;
+        }
         for (i = 0; i < 2; i++) {
             SOCKET from = i ? b : a, to = i ? a : b;
             if (FD_ISSET(from, &f)) {
                 int n = recv(from, buf, sizeof buf, 0);
                 if (n < 0) return;
-                if (!n) { if (i) b_open = 0; else a_open = 0; shutdown(to, SD_SEND); }
-                else if (!transfer(to, buf, n, 1)) return;
+                if (!n) {
+                    if (i) b_open = 0; else a_open = 0;
+                    if (!half_closed) half_closed = GetTickCount64();
+                    shutdown(to, SD_SEND);
+                }
+                else {
+                    if (half_closed) half_closed = GetTickCount64();
+                    if (!transfer(to, buf, n, 1)) return;
+                }
             }
         }
     }
@@ -343,7 +417,7 @@ static void relay_udp(SOCKET control, LONG gen)
             n = recvfrom(incoming, (char *)packet, 65536, 0, (struct sockaddr *)&from, &flen);
             if (n < 4 || packet[0] || packet[1] || packet[2] || from.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) continue;
             if (have_client && (from.sin_port != client.sin_port || from.sin_addr.s_addr != client.sin_addr.s_addr)) continue;
-            asize = address_size(packet + 3, n - 3);
+            asize = pacudp_address_size(packet + 3, (size_t)(n - 3));
             if (!asize) continue;
             if (!have_client) { client = from; have_client = 1; }
             for (i = 0; i < 512; i++) if (peers[i].data != INVALID_SOCKET && peers[i].size == asize && !memcmp(peers[i].addr, packet + 3, asize)) { slot = i; break; }
@@ -352,7 +426,9 @@ static void relay_udp(SOCKET control, LONG gen)
                 int bs;
                 slot = 0;
                 for (i = 0; i < 512; i++) if (peers[i].data == INVALID_SOCKET || peers[i].last < peers[slot].last) { slot = i; if (peers[i].data == INVALID_SOCKET) break; }
-                p = &peers[slot]; udp_close(p);
+                p = &peers[slot];
+                if (p->data != INVALID_SOCKET) pacstatus_udp_evict();
+                udp_close(p);
                 {
                     char proxy_host[256];
                     char ignored[256];
@@ -394,8 +470,17 @@ static void relay_udp(SOCKET control, LONG gen)
             int offset = p->proxy ? 0 : 3 + p->size;
             int n = recv(p->data, (char *)packet + offset, 65507 - offset, 0);
             if (n < 0) { udp_close(p); continue; }
-            if (!p->proxy) { packet[0] = packet[1] = packet[2] = 0; memcpy(packet + 3, p->addr, p->size); }
-            if (have_client) sendto(incoming, (char *)packet, n + offset, 0, (struct sockaddr *)&client, sizeof client);
+            if (!p->proxy) {
+                packet[0] = packet[1] = packet[2] = 0;
+                memcpy(packet + 3, p->addr, p->size);
+                n += offset;
+            } else {
+                size_t restored = pacudp_restore(packet, (size_t)n, 65536,
+                                                  p->addr, (size_t)p->size);
+                if (!restored) continue;
+                n = (int)restored;
+            }
+            if (have_client) sendto(incoming, (char *)packet, n, 0, (struct sockaddr *)&client, sizeof client);
             p->last = last = GetTickCount64();
         }
     }
@@ -451,7 +536,10 @@ static DWORD WINAPI accept_thread(void *unused)
         connection *c;
         HANDLE thread;
         if (s == INVALID_SOCKET) break;
-        if (InterlockedIncrement(&workers) > 4096) { InterlockedDecrement(&workers); closesocket(s); continue; }
+        if (InterlockedIncrement(&workers) > 4096) {
+            pacstatus_worker_cap();
+            InterlockedDecrement(&workers); closesocket(s); continue;
+        }
         c = (connection *)malloc(sizeof *c);
         if (!c) { InterlockedDecrement(&workers); closesocket(s); continue; }
         c->socket = s; c->gen = InterlockedCompareExchange(&generation, 0, 0);
@@ -467,6 +555,8 @@ int pacbridge_prepare(genconf_input *in, int use_pac, int download_proxy,
 {
     in->pac_port = 0;
     in->pac_dns_port = 0;
+    in->pac_dns_vpn_port = 0;
+    in->pac_dns_sys_port = 0;
     in->vpn_proxy_port = 0;
     in->proxy_password = NULL;
     in->client_exe = NULL;
@@ -494,8 +584,15 @@ int pacbridge_prepare(genconf_input *in, int use_pac, int download_proxy,
         CloseHandle(thread);
     }
     if (use_pac) {
+        unsigned short dns_vpn, dns_sys;
         in->pac_port = listen_port;
-        if (!pacdns_start(&in->pac_dns_port, err, cap)) return 0;
+        if (!loopback_pair_port(&dns_vpn) || !loopback_pair_port(&dns_sys)) return 0;
+        in->pac_dns_vpn_port = dns_vpn;
+        in->pac_dns_sys_port = dns_sys;
+        if (
+            !pacdns_start(&in->pac_dns_port,
+                          (unsigned short)in->pac_dns_vpn_port,
+                          (unsigned short)in->pac_dns_sys_port, err, cap)) return 0;
     }
     in->vpn_proxy_port = vpn_port;
     in->proxy_password = secret;
@@ -517,8 +614,9 @@ void pacbridge_activate(pac_script **scripts, int count)
     for (i = 0; i < current_count; i++) current_scripts[i] = scripts[i];
     InterlockedExchange(&enabled, current_count != 0);
     ReleaseSRWLockExclusive(&script_lock);
+    pacbridge_flush_decisions();
 }
-void pacbridge_disconnect(void) { InterlockedIncrement(&generation); }
+void pacbridge_disconnect(void) { InterlockedIncrement(&generation); pacbridge_flush_decisions(); }
 int pacbridge_active(void) { return InterlockedCompareExchange(&enabled, 0, 0) != 0; }
 
 int pacbridge_proxy(unsigned short *port, char password[65])

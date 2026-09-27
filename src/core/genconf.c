@@ -634,6 +634,9 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
     int          i, active_ok = 0;
     char         active_tag[GENCONF_TAG_MAX] = { 0 };
     int          active_awg = 0;
+    char         pac_dns_vpn_server[80] = { 0 };
+    char         pac_dns_system_server[80] = { 0 };
+    int          pac_dns_tag_too_long = 0;
 
     if (out_text) *out_text = NULL;
     if (!in || !in->base_path || !out_text || !in->store)
@@ -696,10 +699,46 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
     dns = json_object_get_object(ro, "dns");
     if (dns) {
         JSON_Array *a = json_object_get_array(dns, "rules");
+        const char *final = json_object_get_string(dns, "final");
+        if (!final) snprintf(pac_dns_system_server, sizeof pac_dns_system_server, "local");
+        else if (strlen(final) < sizeof pac_dns_system_server)
+            snprintf(pac_dns_system_server, sizeof pac_dns_system_server, "%s", final);
+        else pac_dns_tag_too_long = 1;
         if (a) {
+            size_t k, count = json_array_get_count(a);
             user_dns_keep = json_value_deep_copy(json_array_get_wrapping_value(a));
             user_dns_rules = json_value_get_array(user_dns_keep);
+            for (k = 0; k < count && !pac_dns_vpn_server[0]; k++) {
+                JSON_Object *rule = json_array_get_object(a, k);
+                JSON_Array *sets = rule ? json_object_get_array(rule, "rule_set") : NULL;
+                const char *server = rule ? json_object_get_string(rule, "server") : NULL;
+                size_t j, nsets = sets ? json_array_get_count(sets) : 0;
+                for (j = 0; server && j < nsets; j++) {
+                    const char *set = json_array_get_string(sets, j);
+                    if (set && strcmp(set, RULE_SET_TAG) == 0) {
+                        if (strlen(server) < sizeof pac_dns_vpn_server)
+                            snprintf(pac_dns_vpn_server, sizeof pac_dns_vpn_server, "%s", server);
+                        else pac_dns_tag_too_long = 1;
+                        break;
+                    }
+                }
+            }
         }
+    }
+
+    if (in->pac_port && pac_dns_tag_too_long) {
+        json_value_free(user_route_keep);
+        json_value_free(user_dns_keep);
+        json_value_free(root);
+        free_overlays(ovl, novl);
+        return oops(err, errcap, "Тег DNS-сервера для PAC слишком длинный");
+    }
+    if (in->pac_port && (!dns || !pac_dns_vpn_server[0] || !pac_dns_system_server[0])) {
+        json_value_free(user_route_keep);
+        json_value_free(user_dns_keep);
+        json_value_free(root);
+        free_overlays(ovl, novl);
+        return oops(err, errcap, "Для PAC нужны dns.final и DNS-правило rule_set general");
     }
 
     if (!route) {
@@ -821,6 +860,17 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
     route_rules = json_value_init_array();
     rarr = json_value_get_array(route_rules);
 
+    if (in->pac_port && in->pac_dns_vpn_port && in->pac_dns_sys_port) {
+        JSON_Value *v = json_value_init_object();
+        JSON_Value *a = json_value_init_array();
+        JSON_Object *o = json_value_get_object(v);
+        json_array_append_string(json_value_get_array(a), "utgard-pac-dns-vpn");
+        json_array_append_string(json_value_get_array(a), "utgard-pac-dns-sys");
+        json_object_set_value(o, "inbound", a);
+        json_object_set_string(o, "action", "hijack-dns");
+        json_array_append_value(rarr, v);
+    }
+
     /* A PAC download or relay hop explicitly selects the active profile,
        even for a private destination. It must precede process bypasses. */
     if (in->vpn_proxy_port) {
@@ -905,6 +955,21 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
 
         dns_rules = json_value_init_array();
         darr = json_value_get_array(dns_rules);
+
+        if (in->pac_port && in->pac_dns_vpn_port && in->pac_dns_sys_port) {
+            const char *tags[2] = { "utgard-pac-dns-vpn", "utgard-pac-dns-sys" };
+            const char *servers[2] = { pac_dns_vpn_server, pac_dns_system_server };
+            int k;
+            for (k = 0; k < 2; k++) {
+                JSON_Value *v = json_value_init_object();
+                JSON_Value *a = json_value_init_array();
+                JSON_Object *o = json_value_get_object(v);
+                json_array_append_string(json_value_get_array(a), tags[k]);
+                json_object_set_value(o, "inbound", a);
+                json_object_set_string(o, "server", servers[k]);
+                json_array_append_value(darr, v);
+            }
+        }
 
         if (json_array_get_count(json_value_get_array(hosts))) {
             JSON_Value  *v = json_value_init_object();
@@ -1082,6 +1147,26 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
                 json_array_append_value(json_value_get_array(users), user);
                 json_object_set_value(o, "users", users);
                 json_array_append_value(json_value_get_array(iv), v);
+            }
+            if (in->pac_port && in->pac_dns_vpn_port && in->pac_dns_sys_port) {
+                const char *tags[2] = { "utgard-pac-dns-vpn", "utgard-pac-dns-sys" };
+                int ports[2] = { in->pac_dns_vpn_port, in->pac_dns_sys_port };
+                int j;
+                for (j = 0; j < 2; j++) {
+                    JSON_Value *v = json_value_init_object();
+                    JSON_Object *o = json_value_get_object(v);
+                    json_object_set_string(o, "type", "direct");
+                    json_object_set_string(o, "tag", tags[j]);
+                    json_object_set_string(o, "listen", "127.0.0.1");
+                    json_object_set_number(o, "listen_port", ports[j]);
+                    {
+                        JSON_Value *networks = json_value_init_array();
+                        json_array_append_string(json_value_get_array(networks), "tcp");
+                        json_array_append_string(json_value_get_array(networks), "udp");
+                        json_object_set_value(o, "network", networks);
+                    }
+                    json_array_append_value(json_value_get_array(iv), v);
+                }
             }
             json_object_set_value(co, "inbounds", iv);
         }

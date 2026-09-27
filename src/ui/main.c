@@ -6,6 +6,7 @@
 #include "shellopen.h"
 #include "awgcore.h"
 #include "awgsvc.h"
+#include "pacstore.h"
 #include "ui.h"
 
 /* ---- shared state: every module sees it through the externs in ui.h -- */
@@ -106,6 +107,8 @@ int            g_busy;        /* a background job is running */
 const wchar_t *g_busy_text;   /* what it is doing, for the status line */
 
 int  g_host_count, g_app_count, g_pac_count;
+pac_status_record g_pac_status;
+int g_pac_status_valid;
 
 profile_store g_prof;
 /* Set by WM_CREATE, reported once the window exists: a message box inside
@@ -118,6 +121,22 @@ HFONT g_font_mono;
 zapret_info   g_zap;
 
 zapret_status g_status;
+
+static void pac_unreadable_notice(HWND hwnd)
+{
+    wchar_t aside[MAX_PATH * 2], text[MAX_PATH * 2 + 400];
+    const wchar_t *name;
+    if (!pacstore_unreadable_notice(aside, MAX_PATH * 2)) return;
+    name = wcsrchr(aside, L'\\');
+    if (aside[0])
+        StringCchPrintfW(text, sizeof text / sizeof text[0],
+            L"Не удалось прочитать pac.json. Файл не удалён: он переименован в %s рядом с utgard.exe. Настройки PAC начаты заново.",
+            name ? name + 1 : aside);
+    else
+        StringCchCopyW(text, sizeof text / sizeof text[0],
+            L"Не удалось прочитать pac.json и переименовать его. Чтобы не потерять файл, настройки PAC не будут сохраняться до перезапуска Utgard.");
+    problem(hwnd, text);
+}
 
 int     g_count;
 
@@ -936,6 +955,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         }
         if (wp != TIMER_STATUS) return 0;
+        pac_unreadable_notice(hwnd);
         if (g_page == PAGE_ZAPRET && g_zap.valid) {
             if (status_refresh()) {
                 InvalidateRect(hwnd, NULL, TRUE);
@@ -947,6 +967,17 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (vpn_refresh()) {
             tray_set_state(g_vpn_on);
             if (g_page == PAGE_UTGARD || g_page == PAGE_PAC) layout(hwnd);
+        }
+        {
+            pac_status_record pac_now;
+            int valid = g_vpn_on && pacstatus_read(&pac_now) &&
+                        pac_now.active_count > 0 && pacstatus_live(&pac_now);
+            if (valid != g_pac_status_valid ||
+                (valid && memcmp(&pac_now, &g_pac_status, sizeof pac_now))) {
+                g_pac_status_valid = valid;
+                if (valid) g_pac_status = pac_now;
+                if (g_page == PAGE_PAC) InvalidateRect(hwnd, NULL, TRUE);
+            }
         }
         /* An AmneziaWG tunnel with the VPN off is left over: stop it. */
         vpn_reap_orphan(hwnd);
@@ -1051,6 +1082,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     if (cmdline && wcsstr(cmdline, L"--minimized")) show = SW_HIDE;
     ShowWindow(hwnd, show);
     UpdateWindow(hwnd);
+    pac_unreadable_notice(hwnd);
 
     if (g_prof_unreadable) {
         wchar_t        msg[MAX_PATH * 2 + 512];

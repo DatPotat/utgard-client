@@ -27,6 +27,7 @@
 #include "version.h"
 #include "tray.h"
 #include "lists.h"
+#include "pacstatus.h"
 #include <stdlib.h>
 #include <time.h>
 #include <uxtheme.h>
@@ -275,6 +276,8 @@ extern int g_zap_dirty;
 extern int g_busy;
 extern const wchar_t *g_busy_text;
 extern int g_host_count, g_app_count, g_pac_count;
+extern pac_status_record g_pac_status;
+extern int g_pac_status_valid;
 extern profile_store g_prof;
 extern HFONT g_font_mono;
 extern zapret_info g_zap;

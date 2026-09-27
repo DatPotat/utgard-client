@@ -18,4 +18,6 @@ int pacbridge_active(void);
 int pacbridge_proxy(unsigned short *port, char password[65]);
 /* Number of PAC files currently participating in each decision. */
 int pacbridge_count(void);
+int pacbridge_decide_host(const char *host, unsigned short port);
+void pacbridge_flush_decisions(void);
 #endif

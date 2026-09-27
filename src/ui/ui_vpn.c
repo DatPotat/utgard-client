@@ -520,11 +520,12 @@ static int plan_prepare(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
         }
         for (i = 0; i < settings.count; i++)
             if (settings.items[i].enabled) v->plan[which].pac_count++;
-        v->in.pac_port = v->in.pac_dns_port = v->in.vpn_proxy_port = 0;
+        v->in.pac_port = v->in.pac_dns_port = v->in.pac_dns_vpn_port =
+            v->in.pac_dns_sys_port = v->in.vpn_proxy_port = 0;
         v->in.proxy_password = NULL;
         v->in.client_exe = NULL;
         if (v->plan[which].pac_count &&
-            !pacproc_prepare(&v->plan[which].pac, &v->in, msg, cap)) {
+            !pacproc_prepare(&v->plan[which].pac, &v->in, &settings, msg, cap)) {
             pacstore_free(&settings);
             return 0;
         }
@@ -542,6 +543,11 @@ static int plan_prepare(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
 static int plan_up(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
 {
     HANDLE process = NULL;
+    if (v->plan[which].pac_count && singbox_running()) {
+        StringCchCopyW(msg, cap, L"sing-box уже запущен; PAC нельзя безопасно подключить к существующему процессу");
+        pacproc_cancel(&v->plan[which].pac);
+        return 0;
+    }
     /* Both the AmneziaWG service and sing-box create a Wintun adapter. */
     if (!netsetup_ensure(msg, cap)) return 0;
     if (v->plan[which].awg) {
