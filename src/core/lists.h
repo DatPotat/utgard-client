@@ -39,6 +39,11 @@ int lists_tidy_text(const char *in, char *out, size_t outcap, int *removed);
    and entries a plain parent already covers. Comments and blanks stay. */
 int lists_tidy_zapret(const char *in, char *out, size_t outcap, int *removed);
 
+/* One line of the VPN list as sing-box will see it: comment, scheme and path
+   stripped, lowercased, an IP given /32. 1 ok, 0 nothing there, -1 refused
+   (a single label, which would route a whole zone). */
+int lists_normalize(const char *raw, char *out, size_t cap);
+
 /* One trimmed, non-empty, non-comment line per entry. Used for the list of
    applications that go through the tunnel. */
 int lists_read_text(const char *in, char out[][LIST_ENTRY_MAX], int max);

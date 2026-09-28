@@ -16,10 +16,16 @@ int    g_dpi  = USER_DEFAULT_SCREEN_DPI;
 int    g_page = PAGE_UTGARD;
 
 HFONT  g_font, g_font_big, g_font_small;
+HFONT  g_font_bold, g_font_small_bold, g_font_title, g_font_deco;
+HWND   g_set_adv;
+HWND   g_sel[SEL_COUNT];
+int    g_set_adv_open;
+HWND   g_zap_search, g_zap_again, g_zg[4], g_zi[3];
+HWND   g_nav[NAV_COUNT], g_row_server, g_tab_sites, g_tab_apps, g_tab_pac, g_set_theme;
 
 HBRUSH g_brush_bg, g_brush_footer, g_brush_surface, g_brush_line;
 
-HWND g_tab_utgard, g_tab_zapret, g_toggle, g_pick_path, g_list;
+HWND g_toggle, g_pick_path, g_list;
 
 HWND g_zap_start, g_zap_stop, g_zap_restart;
 
@@ -77,7 +83,7 @@ int       g_pk_checked_n;
 
 HWND    g_ed_name[ED_ROWS], g_ed_nplus[ED_ROWS], g_ed_nminus[ED_ROWS];
 
-HWND    g_ed_path[ED_ROWS], g_ed_pplus[ED_ROWS], g_ed_pminus[ED_ROWS];
+HWND    g_ed_path[ED_ROWS], g_ed_pplus[ED_ROWS], g_ed_pminus[ED_ROWS], g_ed_pbrowse[ED_ROWS];
 
 HWND    g_ed_back, g_ed_save;
 
@@ -144,7 +150,7 @@ int     g_count;
    now: any PROXY wins, errors go DIRECT, lists and apps come first. */
 static const wchar_t TIP_PAC[] =
     L"Активные PAC проверяются вместе: если хотя бы один отвечает PROXY, HTTP, "
-    L"SOCKS или SOCKS5, соединение идёт через выбранный профиль Utgard. "
+    L"SOCKS или SOCKS5, соединение идёт через выбранный сервер Utgard. "
     L"Напрямую — только если все ответили DIRECT. Адреса прокси из самих "
     L"PAC-файлов не используются.\n\n"
     L"Списки сайтов и приложений, локальная сеть и правила рабочего VPN "
@@ -190,11 +196,10 @@ static const wchar_t TIP_STACK[] =
     L"В следующих версиях sing-box выбор уберут и оставят один встроенный стек.";
 
 static const wchar_t TIP_DNS[] =
-    L"Через какой сервер узнавать адреса сайтов из списка и имён, которые PAC "
-    L"отправляет в VPN. Запросы идут зашифрованными (DNS поверх HTTPS), "
-    L"провайдер интернета их не видит. HTTP/3 работает поверх QUIC (UDP), "
-    L"HTTP/2 — поверх обычного TCP: выберите HTTP/2, если в вашей сети QUIC "
-    L"блокируется. NextDNS используется без профиля, то есть без его фильтров.";
+    L"Запросы шифруются — провайдер их не видит.\n\n"
+    L"HTTP/3 и HTTP/2 — два способа отправить запрос. HTTP/3 обычно "
+    L"соединяется быстрее, но в некоторых сетях его блокируют. HTTP/2 работает "
+    L"почти везде. Если сайты через VPN не открываются — выберите HTTP/2.";
 
 static const wchar_t TIP_HOSTS[] =
     L"Update Hosts File — обновление файла hosts для починки веб-версии "
@@ -212,16 +217,15 @@ static void window_show(HWND hwnd)
 
 static void tray_menu(HWND hwnd)
 {
-    HMENU menu = CreatePopupMenu();
+    HMENU menu = menu_create();
     POINT pt;
     UINT  cmd;
 
-    AppendMenuW(menu, MF_STRING, ID_TRAY_OPEN, L"Открыть Utgard");
-    AppendMenuW(menu, MF_STRING | (g_prof.count && !g_busy ? 0 : MF_GRAYED), ID_TRAY_VPN,
-                g_vpn_on ? L"Выключить VPN" : L"Включить VPN");
-    AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(menu, MF_STRING, ID_TRAY_EXIT, L"Выход");
-    SetMenuDefaultItem(menu, ID_TRAY_OPEN, FALSE);
+    menu_add(menu, ID_TRAY_OPEN, L"Открыть Utgard", 0);
+    menu_add(menu, ID_TRAY_VPN, g_vpn_on ? L"Выключить VPN" : L"Включить VPN",
+             !(g_prof.count && !g_busy));
+    menu_separator(menu);
+    menu_add(menu, ID_TRAY_EXIT, L"Выход", 0);
 
     /* Without becoming foreground first, the menu would not close when the
        user clicks elsewhere - a documented quirk of notification menus. */
@@ -244,21 +248,18 @@ static void tray_menu(HWND hwnd)
     }
 }
 
-static void apply_dark_caption(HWND hwnd)
-{
-    BOOL     dark    = TRUE;
-    COLORREF caption = CLR_BG;
-    /* Documented for Windows 11 build 22000+; older builds return an error
-       and keep the system caption. Both failures are harmless. */
-    DwmSetWindowAttribute(hwnd, UTG_DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof dark);
-    DwmSetWindowAttribute(hwnd, UTG_DWMWA_CAPTION_COLOR, &caption, sizeof caption);
-}
-
 static void set_fonts(void)
 {
-    SendMessageW(g_tab_utgard, WM_SETFONT, (WPARAM)g_font, TRUE);
-    SendMessageW(g_tab_zapret, WM_SETFONT, (WPARAM)g_font, TRUE);
-    SendMessageW(g_set_open,   WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_set_theme,  WM_SETFONT, (WPARAM)g_font, TRUE);
+    hl_fonts();
+    if (g_tip) {
+        RECT m = { S(12), S(8), S(12), S(8) };
+        SendMessageW(g_tip, WM_SETFONT, (WPARAM)g_font_small, TRUE);
+        SendMessageW(g_tip, TTM_SETMARGIN, 0, (LPARAM)&m);
+    }
+    SendMessageW(g_zap_search, WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_zap_search, EM_SETCUEBANNER, TRUE, (LPARAM)L"Найти стратегию");
+    SendMessageW(g_pk_search, EM_SETCUEBANNER, TRUE, (LPARAM)L"Найти приложение");
     SendMessageW(g_ping_now,   WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_set_mtu,    WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_set_log,    WM_SETFONT, (WPARAM)g_font, TRUE);
@@ -344,11 +345,19 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     (void)msg; (void)wp; (void)lp;
     g_dpi = (int)GetDpiForWindow(hwnd);
     fonts_create();
-    apply_dark_caption(hwnd);
-    g_tab_utgard = make_button(hwnd, L"Utgard", ID_TAB_UTGARD, BK_TAB);
-    g_tab_zapret = make_button(hwnd, L"zapret", ID_TAB_ZAPRET, BK_TAB);
-    g_set_open   = make_button(hwnd, L"Настройки", ID_SET_OPEN, BK_SECONDARY);
-    g_ping_now   = make_button(hwnd, L"ping до сервера", ID_PING_NOW, BK_SECONDARY);
+    theme_caption(hwnd);
+    {
+        static const wchar_t *names[NAV_COUNT] = {
+            L"Подключение", L"Серверы", L"Маршрутизация", L"zapret", L"Настройки" };
+        int k;
+        for (k = 0; k < NAV_COUNT; k++)
+            g_nav[k] = make_button(hwnd, names[k], ID_NAV_FIRST + k, BK_NAV);
+    }
+    g_row_server = make_button_on(hwnd, L"", ID_ROW_SERVER, BK_ROW, BACK_CARD);
+    g_tab_sites  = make_button(hwnd, L"Сайты", ID_TAB_SITES, BK_TAB);
+    g_tab_apps   = make_button(hwnd, L"Приложения", ID_TAB_APPS, BK_TAB);
+    g_tab_pac    = make_button(hwnd, L"Правила PAC", ID_TAB_PAC, BK_TAB);
+    g_ping_now   = make_button(hwnd, L"Проверить задержку", ID_PING_NOW, BK_SECONDARY);
     {
         HINSTANCE inst = (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE);
         int i;
@@ -407,21 +416,37 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             SendMessageW(g_set_sub, CB_ADDSTRING, 0, (LPARAM)line);
         }
 
-        g_set_tray = make_button(hwnd, L"Сворачивать в трей при закрытии",
-                                 ID_SET_TRAY, BK_CHECK);
-        g_set_auto = make_button(hwnd, L"Запускать вместе с Windows (свёрнутым в трей)",
-                                 ID_SET_AUTO, BK_CHECK);
-        g_set_upd  = make_button(hwnd, L"Проверять обновления при запуске",
-                                 ID_SET_UPD, BK_CHECK);
+        g_set_theme = CreateWindowExW(0, L"COMBOBOX", NULL,
+            WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0,
+            hwnd, (HMENU)(INT_PTR)ID_SET_THEME, inst, NULL);
+
+        g_set_tray = make_button_on(hwnd, L"Сворачивать в трей при закрытии",
+                                 ID_SET_TRAY, BK_CHECK, BACK_CARD);
+        g_set_auto = make_button_on(hwnd, L"Запускать вместе с Windows",
+                                 ID_SET_AUTO, BK_CHECK, BACK_CARD);
+        g_set_upd  = make_button_on(hwnd, L"Сообщать о новых версиях",
+                                 ID_SET_UPD, BK_CHECK, BACK_CARD);
         g_set_upd_now = make_button(hwnd, L"Проверить обновления", ID_SET_UPD_NOW,
                                     BK_SECONDARY);
         /* The versions in use, each a link to its own release page. */
-        g_set_v_utgard  = make_button(hwnd, L"Utgard " UTGARD_VERSION_W, ID_SET_V_UTGARD, BK_LINK);
-        g_set_v_singbox = make_button(hwnd, L"", ID_SET_V_SINGBOX, BK_LINK);
-        g_set_v_awg     = make_button(hwnd, L"", ID_SET_V_AWG, BK_LINK);
+        g_set_v_utgard  = make_button_on(hwnd, L"Utgard " UTGARD_VERSION_W, ID_SET_V_UTGARD, BK_LINK, BACK_CARD);
+        g_set_v_singbox = make_button_on(hwnd, L"", ID_SET_V_SINGBOX, BK_LINK, BACK_CARD);
+        g_set_v_awg     = make_button_on(hwnd, L"", ID_SET_V_AWG, BK_LINK, BACK_CARD);
 
-        g_set_back = make_button_on(hwnd, L"Назад", ID_SET_BACK, BK_SECONDARY, CLR_FOOTER);
-        g_set_save = make_button_on(hwnd, L"Сохранить", ID_SET_SAVE, BK_PRIMARY, CLR_FOOTER);
+        g_set_adv  = make_button_on(hwnd, L"", ID_SET_ADV, BK_ROW, BACK_CARD);
+        {
+            /* Each drop-down field stands for a hidden combo box. */
+            HWND combos[SEL_COUNT];
+            int  k;
+            combos[SEL_DNS] = g_set_dns; combos[SEL_SUB] = g_set_sub; combos[SEL_THEME] = g_set_theme;
+            combos[SEL_LOG] = g_set_log; combos[SEL_STACK] = g_set_stack;
+            for (k = 0; k < SEL_COUNT; k++) {
+                g_sel[k] = make_button_on(hwnd, L"", ID_SEL_FIRST + k, BK_SELECT, BACK_CARD);
+                SetPropW(g_sel[k], L"utgard.combo", (HANDLE)combos[k]);
+            }
+        }
+        g_set_back = make_button_on(hwnd, L"Назад", ID_SET_BACK, BK_SECONDARY, BACK_FOOTER);
+        g_set_save = make_button_on(hwnd, L"Сохранить", ID_SET_SAVE, BK_PRIMARY, BACK_FOOTER);
     }
     g_toggle     = make_button(hwnd, L"Включить", ID_TOGGLE, BK_PRIMARY);
     g_pick_path  = make_button(hwnd, L"Указать папку…", ID_PICK_PATH, BK_SECONDARY);
@@ -442,15 +467,15 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                               0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_PROFILES,
                               (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
                               NULL);
-    SendMessageW(g_plist, LB_SETITEMHEIGHT, 0, (LPARAM)S(34));
+    SendMessageW(g_plist, LB_SETITEMHEIGHT, 0, (LPARAM)S(44));
     SetWindowTheme(g_plist, L"DarkMode_Explorer", NULL);
     list_hover_attach(g_plist);
-    g_prof_add = make_button_on(hwnd, L"Добавить профиль…", ID_PROF_ADD,
-                                BK_SECONDARY, CLR_FOOTER);
+    g_prof_add = make_button_on(hwnd, L"Добавить сервер…", ID_PROF_ADD,
+                                BK_PRIMARY, BACK_PAGE);
     g_prof_del = make_button_on(hwnd, L"Удалить", ID_PROF_DEL,
-                                BK_DANGER, CLR_FOOTER);
+                                BK_DANGER, BACK_PAGE);
     g_prof_sub = make_button_on(hwnd, L"Подписка…", ID_PROF_SUB,
-                                BK_SECONDARY, CLR_FOOTER);
+                                BK_SECONDARY, BACK_PAGE);
     g_alist = CreateWindowExW(0, L"LISTBOX", NULL,
                               WS_CHILD | WS_VSCROLL | WS_TABSTOP |
                               LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY,
@@ -462,11 +487,11 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     g_alist_prev = (WNDPROC)SetWindowLongPtrW(g_alist, GWLP_WNDPROC,
                                               (LONG_PTR)alist_proc);
     g_app_back   = make_button_on(hwnd, L"Назад", ID_APPS_BACK,
-                                  BK_SECONDARY, CLR_FOOTER);
+                                  BK_SECONDARY, BACK_FOOTER);
     g_app_pick   = make_button_on(hwnd, L"Выбрать из запущенных…",
-                                  ID_APPS_PICK, BK_PRIMARY, CLR_FOOTER);
+                                  ID_APPS_PICK, BK_PRIMARY, BACK_PAGE);
     g_app_manual = make_button_on(hwnd, L"Добавить вручную…",
-                                  ID_APPS_MANUAL, BK_SECONDARY, CLR_FOOTER);
+                                  ID_APPS_MANUAL, BK_SECONDARY, BACK_PAGE);
     g_hedit = CreateWindowExW(0, L"EDIT", L"",
                               WS_CHILD | WS_TABSTOP | WS_VSCROLL |
                               ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
@@ -501,28 +526,31 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 (HMENU)(INT_PTR)(ID_ED_PATH + i), inst, NULL);
             SendMessageW(g_ed_name[i], EM_SETLIMITTEXT, MAX_PATH - 1, 0);
             SendMessageW(g_ed_path[i], EM_SETLIMITTEXT, MAX_PATH - 1, 0);
+            g_ed_pbrowse[i] = make_button_on(hwnd, L"Выбрать exe-файл…", ID_ED_PBROWSE + i,
+                                             BK_ICON, BACK_CARD);
             g_ed_nplus[i]  = make_button(hwnd, L"+", ID_ED_NPLUS + i, BK_SECONDARY);
             g_ed_nminus[i] = make_button(hwnd, L"−", ID_ED_NMINUS + i, BK_DANGER);
             g_ed_pplus[i]  = make_button(hwnd, L"+", ID_ED_PPLUS + i, BK_SECONDARY);
             g_ed_pminus[i] = make_button(hwnd, L"−", ID_ED_PMINUS + i, BK_DANGER);
         }
-        g_ed_back = make_button_on(hwnd, L"Назад", ID_ED_BACK, BK_SECONDARY, CLR_FOOTER);
-        g_ed_save = make_button_on(hwnd, L"Сохранить", ID_ED_SAVE, BK_PRIMARY, CLR_FOOTER);
+        g_ed_back = make_button_on(hwnd, L"Назад", ID_ED_BACK, BK_SECONDARY, BACK_FOOTER);
+        g_ed_save = make_button_on(hwnd, L"Сохранить", ID_ED_SAVE, BK_PRIMARY, BACK_FOOTER);
     }
-    g_pk_back = make_button_on(hwnd, L"Назад", ID_PICK_BACK, BK_SECONDARY, CLR_FOOTER);
+    g_pk_back = make_button_on(hwnd, L"Назад", ID_PICK_BACK, BK_SECONDARY, BACK_FOOTER);
     g_pk_save = make_button_on(hwnd, L"Сохранить приложение", ID_PICK_SAVE,
-                               BK_PRIMARY, CLR_FOOTER);
-    g_h_back = make_button_on(hwnd, L"Назад", ID_HOSTS_BACK, BK_SECONDARY, CLR_FOOTER);
+                               BK_PRIMARY, BACK_FOOTER);
+    g_h_back = make_button_on(hwnd, L"Назад", ID_HOSTS_BACK, BK_SECONDARY, BACK_PAGE);
     g_h_tidy = make_button_on(hwnd, L"Убрать дубли", ID_HOSTS_TIDY,
-                              BK_SECONDARY, CLR_FOOTER);
-    g_h_save = make_button_on(hwnd, L"Сохранить", ID_HOSTS_SAVE, BK_PRIMARY, CLR_FOOTER);
-    g_btn_hosts = make_button(hwnd, L"Список сайтов…", ID_EDIT_HOSTS, BK_SECONDARY);
-    g_btn_apps  = make_button(hwnd, L"Приложения…", ID_EDIT_APPS, BK_SECONDARY);
-    g_btn_pac   = make_button(hwnd, L"PAC…", ID_PAC, BK_SECONDARY);
+                              BK_SECONDARY, BACK_PAGE);
+    g_h_save = make_button_on(hwnd, L"Сохранить", ID_HOSTS_SAVE, BK_PRIMARY, BACK_PAGE);
+    hl_create(hwnd);
+    g_btn_hosts = make_button_on(hwnd, L"Сайты", ID_EDIT_HOSTS, BK_ROW, BACK_CARD);
+    g_btn_apps  = make_button_on(hwnd, L"Приложения", ID_EDIT_APPS, BK_ROW, BACK_CARD);
+    g_btn_pac   = make_button_on(hwnd, L"Правила PAC", ID_PAC, BK_ROW, BACK_CARD);
     {
         LVCOLUMNW column;
-        static const wchar_t *titles[] = { L"Включён", L"Источник", L"Тип", L"Состояние" };
-        static const int widths[] = { 70, 245, 60, 130 };
+        static const wchar_t *titles[] = { L"Источник", L"Тип", L"Состояние" };
+        static const int widths[] = { 300, 70, 160 };
         int i;
         INITCOMMONCONTROLSEX icc = { sizeof icc, ICC_LISTVIEW_CLASSES };
         InitCommonControlsEx(&icc);
@@ -531,6 +559,11 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_PAC_LIST,
             (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE), NULL);
         ListView_SetExtendedListViewStyle(g_pac_list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+        /* Drawn like the servers table: the page paints the headings, each
+           row is drawn whole (pac_row_draw); the columns only hold the text.
+           A one-pixel-wide image list sets the row height. */
+        SetWindowLongPtrW(g_pac_list, GWL_STYLE, GetWindowLongPtrW(g_pac_list, GWL_STYLE) | LVS_NOCOLUMNHEADER);
+        ListView_SetImageList(g_pac_list, ImageList_Create(1, S(44), ILC_COLOR32, 1, 0), LVSIL_SMALL);
         SetWindowTheme(g_pac_list, L"DarkMode_Explorer", NULL);
         ListView_SetBkColor(g_pac_list, CLR_SURFACE);
         ListView_SetTextBkColor(g_pac_list, CLR_SURFACE);
@@ -538,29 +571,39 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         SetWindowSubclass(g_pac_list, pac_list_proc, 1, 0);
         ZeroMemory(&column, sizeof column);
         column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
-        for (i = 0; i < 4; i++) {
+        for (i = 0; i < 3; i++) {
             column.iSubItem = i; column.pszText = (LPWSTR)titles[i]; column.cx = S(widths[i]);
             ListView_InsertColumn(g_pac_list, i, &column);
         }
     }
-    g_pac_back = make_button_on(hwnd, L"Назад", ID_PAC_BACK, BK_SECONDARY, CLR_FOOTER);
-    g_pac_file = make_button_on(hwnd, L"Добавить файл…", ID_PAC_FILE, BK_PRIMARY, CLR_FOOTER);
-    g_pac_url = make_button_on(hwnd, L"Добавить URL…", ID_PAC_URL, BK_PRIMARY, CLR_FOOTER);
+    g_pac_back = make_button_on(hwnd, L"Назад", ID_PAC_BACK, BK_SECONDARY, BACK_FOOTER);
+    g_pac_file = make_button_on(hwnd, L"Добавить файл…", ID_PAC_FILE, BK_SECONDARY, BACK_PAGE);
+    g_pac_url = make_button_on(hwnd, L"Добавить по адресу…", ID_PAC_URL, BK_PRIMARY, BACK_PAGE);
     g_pac_toggle = make_button(hwnd, L"Включить / выключить", ID_PAC_TOGGLE, BK_SECONDARY);
     g_pac_refresh = make_button(hwnd, L"Обновить", ID_PAC_REFRESH, BK_SECONDARY);
     g_pac_delete = make_button(hwnd, L"Удалить", ID_PAC_DELETE, BK_DANGER);
     g_pac_help = make_button(hwnd, L"Как работает PAC", ID_PAC_HELP, BK_LINK);
-    g_zap_start   = make_button_on(hwnd, L"Запустить", ID_ZAP_START,
-                                   BK_PRIMARY, CLR_FOOTER);
-    g_zap_stop    = make_button(hwnd, L"Выключить", ID_ZAP_STOP, BK_DANGER);
-    g_zap_restart = make_button(hwnd, L"Перезапустить", ID_ZAP_RESTART, BK_SECONDARY);
-    g_zap_fix = make_button_on(hwnd, L"Исправить конфликт VPN и zapret",
-                               ID_ZAP_FIX, BK_SECONDARY, CLR_SURFACE);
+    g_zap_start   = make_button(hwnd, L"Запустить выбранную", ID_ZAP_START, BK_PRIMARY);
+    g_zap_stop    = make_button_on(hwnd, L"Выключить", ID_ZAP_STOP, BK_SECONDARY, BACK_ACCENT);
+    g_zap_restart = make_button_on(hwnd, L"Перезапустить", ID_ZAP_RESTART, BK_SECONDARY, BACK_ACCENT);
+    g_zap_fix = make_button_on(hwnd, L"Исправить", ID_ZAP_FIX, BK_PRIMARY, BACK_CARD);
     g_zap_game  = make_button(hwnd, L"Game filter", ID_ZAP_GAME, BK_SECONDARY);
     g_zap_ipset = make_button(hwnd, L"IPSet filter", ID_ZAP_IPSET, BK_SECONDARY);
-    g_zap_ipupd = make_button(hwnd, L"Обновить список IPSet", ID_ZAP_IPUPD, BK_SECONDARY);
-    g_zap_hosts = make_button(hwnd, L"Обновить файл hosts", ID_ZAP_HOSTS, BK_SECONDARY);
-    g_zap_list  = make_button(hwnd, L"Список хостов zapret…", ID_ZAP_LIST, BK_SECONDARY);
+    g_zap_ipupd = make_button_on(hwnd, L"Обновить", ID_ZAP_IPUPD, BK_SECONDARY, BACK_CARD);
+    g_zap_hosts = make_button_on(hwnd, L"Проверить", ID_ZAP_HOSTS, BK_SECONDARY, BACK_CARD);
+    g_zap_list  = make_button_on(hwnd, L"Сайты для zapret", ID_ZAP_LIST, BK_ROW, BACK_CARD);
+    {
+        static const wchar_t *game[4] = { L"Выкл.", L"TCP и UDP", L"TCP", L"UDP" };
+        static const wchar_t *ipset[3] = { L"Выкл.", L"По списку", L"Любой адрес" };
+        int k;
+        for (k = 0; k < 4; k++) g_zg[k] = make_button_on(hwnd, game[k], ID_ZG_FIRST + k, BK_CHIP, BACK_CARD);
+        for (k = 0; k < 3; k++) g_zi[k] = make_button_on(hwnd, ipset[k], ID_ZI_FIRST + k, BK_CHIP, BACK_CARD);
+    }
+    g_zap_again = make_button_on(hwnd, L"Перезапустить", ID_ZAP_AGAIN, BK_SECONDARY, BACK_TINT);
+    g_zap_search = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL,
+                                   0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_ZAP_SEARCH,
+                                   (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE), NULL);
+    ask_edit_center(g_zap_search);
 
     {
         /* Rect-based tooltips on the parent: the "что это?" labels are
@@ -584,7 +627,9 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                                 (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
                                 NULL);
         if (g_tip) {
-            SendMessageW(g_tip, TTM_SETMAXTIPWIDTH, 0, (LPARAM)S(420));
+            SendMessageW(g_tip, TTM_SETMAXTIPWIDTH, 0, (LPARAM)S(360));
+            /* Unthemed, so the app draws it whole (NM_CUSTOMDRAW below). */
+            SetWindowTheme(g_tip, L"", L"");
             ZeroMemory(&ti, sizeof ti);
             ti.cbSize   = sizeof ti;
             ti.uFlags   = TTF_SUBCLASS;
@@ -600,10 +645,32 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             ti.uId      = (UINT_PTR)g_pac_help;
             ti.lpszText = (LPWSTR)TIP_PAC;
             SendMessageW(g_tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+            /* The filter choices and the list buttons are windows of their
+               own: the pointer over them never reaches the rects above. */
+            for (i = 0; i < 4; i++) {
+                ti.uId = (UINT_PTR)g_zg[i]; ti.lpszText = (LPWSTR)TIP_GAME;
+                SendMessageW(g_tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+            }
+            for (i = 0; i < 3; i++) {
+                ti.uId = (UINT_PTR)g_zi[i]; ti.lpszText = (LPWSTR)TIP_IPSET;
+                SendMessageW(g_tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+            }
+            ti.uId = (UINT_PTR)g_zap_ipupd; ti.lpszText = (LPWSTR)TIP_IPUPD;
+            SendMessageW(g_tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+            ti.uId = (UINT_PTR)g_zap_hosts; ti.lpszText = (LPWSTR)TIP_HOSTS;
+            SendMessageW(g_tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
             SendMessageW(g_tip, TTM_SETDELAYTIME, TTDT_AUTOPOP, MAKELPARAM(32767, 0));
         }
     }
+    {
+        /* Theme-drawn scroll bars and rounded corners for every scrolling
+           control that sits in a card. */
+        HWND lists[] = { g_list, g_plist, g_alist, g_pk_list, g_hedit, g_pac_list, g_hl_list };
+        size_t k;
+        for (k = 0; k < sizeof lists / sizeof lists[0]; k++) scroll_attach(lists[k]);
+    }
     set_fonts();
+    theme_apply(hwnd);
     {
         wchar_t remembered[ZAPRET_PATH_MAX];
         if (zapret_path_load(remembered, ZAPRET_PATH_MAX))
@@ -615,14 +682,9 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
         static const wchar_t *dirs[] = { L"sing-box", L"list",
                                          L"list\\applications", L"logs" };
-        static const COLORREF theme[ASK_COLOR_COUNT] = {
-            CLR_BG, CLR_SURFACE, CLR_LINE, CLR_TEXT,
-            CLR_MUTED, CLR_OK, CLR_WARN, CLR_ACCENT
-        };
         wchar_t d[MAX_PATH * 2];
         size_t  k;
 
-        ask_configure_colors(theme);
         for (k = 0; k < sizeof dirs / sizeof dirs[0]; k++)
             if (root_file(dirs[k], d, MAX_PATH * 2)) CreateDirectoryW(d, NULL);
         /* Checked on every start, not only the first: a folder deleted
@@ -655,9 +717,7 @@ exc_check_start(hwnd);
     /* Ask after the window is up, not before: a message box over nothing
        is a poor first impression. */
     PostMessageW(hwnd, WM_APP_INSTALL_ASK, 0, 0);
-    ask_configure(draw_button, S, g_font, g_font_small,
-                  g_brush_bg, g_brush_surface, g_brush_line,
-                  CLR_TEXT, CLR_MUTED, CLR_SURFACE);
+    theme_ask();
     strategies_reload();
     status_refresh();
     SetTimer(hwnd, TIMER_STATUS, 2000, NULL);
@@ -687,8 +747,62 @@ static LRESULT on_command(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             layout(hwnd); return 0;
         }
     }
+    if (hl_command(hwnd, LOWORD(wp), HIWORD(wp))) return 0;
+    if (LOWORD(wp) >= ID_SEL_FIRST && LOWORD(wp) < ID_SEL_FIRST + SEL_COUNT) {
+        HWND field = g_sel[LOWORD(wp) - ID_SEL_FIRST];
+        select_open(hwnd, field, (HWND)GetPropW(field, L"utgard.combo"));
+        return 0;
+    }
+    if (LOWORD(wp) >= ID_ED_PBROWSE && LOWORD(wp) < ID_ED_PBROWSE + ED_ROWS) {
+        wchar_t path[MAX_PATH];
+        if (pick_file(hwnd, L"Выбрать программу", L"Программы (*.exe)", L"*.exe", path, MAX_PATH))
+            SetWindowTextW(g_ed_path[LOWORD(wp) - ID_ED_PBROWSE], path);
+        return 0;
+    }
+    if (LOWORD(wp) >= ID_ZG_FIRST && LOWORD(wp) < ID_ZG_FIRST + 4) {
+        act_zap_game_to(hwnd, LOWORD(wp) - ID_ZG_FIRST);
+        return 0;
+    }
+    if (LOWORD(wp) >= ID_ZI_FIRST && LOWORD(wp) < ID_ZI_FIRST + 3) {
+        static const int modes[3] = { IPSET_NONE, IPSET_LOADED, IPSET_ANY };
+        act_zap_ipset_to(hwnd, modes[LOWORD(wp) - ID_ZI_FIRST]);
+        return 0;
+    }
+    if (LOWORD(wp) == ID_ZAP_SEARCH) {
+        if (HIWORD(wp) == EN_CHANGE) { strategies_filter(); layout(hwnd); }
+        return 0;
+    }
+    if (LOWORD(wp) == ID_ZAP_AGAIN) { act_restart(hwnd); return 0; }
+    if ((LOWORD(wp) == ID_SET_LOG || LOWORD(wp) == ID_SET_STACK || LOWORD(wp) == ID_SET_DNS ||
+         LOWORD(wp) == ID_SET_SUB || LOWORD(wp) == ID_SET_THEME) && HIWORD(wp) == CBN_SELCHANGE) {
+        set_save(hwnd);
+        return 0;
+    }
+    if (LOWORD(wp) == ID_SET_MTU && HIWORD(wp) == EN_KILLFOCUS && g_page == PAGE_SETTINGS) {
+        set_save(hwnd);
+        return 0;
+    }
+    if (((LOWORD(wp) >= ID_NAV_FIRST && LOWORD(wp) < ID_NAV_FIRST + NAV_COUNT) ||
+         LOWORD(wp) == ID_ROW_SERVER || LOWORD(wp) == ID_TAB_SITES ||
+         LOWORD(wp) == ID_TAB_APPS || LOWORD(wp) == ID_TAB_PAC) && !page_leave_ok(hwnd))
+        return 0;
     switch (LOWORD(wp)) {
-    case ID_SET_OPEN: set_open(hwnd); return 0;
+    case ID_NAV_FIRST + NAV_CONNECT:
+    case ID_NAV_FIRST + NAV_SERVERS:
+        KillTimer(hwnd, TIMER_PICK);
+        g_page = LOWORD(wp) == ID_NAV_FIRST + NAV_CONNECT ? PAGE_UTGARD : PAGE_SERVERS;
+        lists_refresh_counts();
+        layout(hwnd);
+        return 0;
+    case ID_ROW_SERVER:
+        g_page = PAGE_SERVERS;
+        layout(hwnd);
+        return 0;
+    case ID_NAV_FIRST + NAV_ROUTING:
+    case ID_TAB_SITES:  act_edit_hosts(hwnd); return 0;
+    case ID_TAB_APPS:   act_edit_apps(hwnd); return 0;
+    case ID_TAB_PAC:    pac_open_page(hwnd); return 0;
+    case ID_NAV_FIRST + NAV_SETTINGS: set_open(hwnd); return 0;
     case ID_PING_NOW:
         if (!g_ping_busy) ping_start(hwnd);
         return 0;
@@ -704,18 +818,17 @@ static LRESULT on_command(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (GetPropW(box, L"utgard.checked")) RemovePropW(box, L"utgard.checked");
         else SetPropW(box, L"utgard.checked", (HANDLE)1);
         InvalidateRect(box, NULL, FALSE);
+        set_save(hwnd);
         return 0;
     }
+    case ID_SET_ADV:
+        g_set_adv_open = !g_set_adv_open;
+        layout(hwnd);
+        return 0;
     case ID_SET_BACK: g_page = PAGE_UTGARD; layout(hwnd); return 0;
     case ID_SET_SAVE: set_save(hwnd); return 0;
 
-    case ID_TAB_UTGARD:
-        KillTimer(hwnd, TIMER_PICK);
-        g_page = PAGE_UTGARD;
-        lists_refresh_counts();
-        layout(hwnd);
-        return 0;
-    case ID_TAB_ZAPRET:
+    case ID_NAV_FIRST + NAV_ZAPRET:
         KillTimer(hwnd, TIMER_PICK);
         g_page = PAGE_ZAPRET;
         status_refresh();
@@ -999,10 +1112,16 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         layout(hwnd);               /* re-enables the refresh button too */
         return 0;
 
+    case WM_MEASUREITEM:
+        if (menu_measure((MEASUREITEMSTRUCT *)lp)) return TRUE;
+        break;
+
     case WM_DRAWITEM: {
+        if (menu_draw((const DRAWITEMSTRUCT *)lp)) return TRUE;
         const DRAWITEMSTRUCT *d = (const DRAWITEMSTRUCT *)lp;
         if (d->CtlType == ODT_LISTBOX) {
             if (d->CtlID == ID_PROFILES)      draw_profile(d);
+            else if (d->CtlID == ID_HL_LIST)   draw_host_row(d);
             else if (d->CtlID == ID_APPS_LIST) draw_app_row(d);
             else if (d->CtlID == ID_PICK_LIST) draw_pick_row(d);
             else                               draw_strategy(d);
@@ -1014,6 +1133,13 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
     case WM_NOTIFY: {
         NMHDR *h = (NMHDR *)lp;
+        if (h && h->hwndFrom == g_tip) {
+            if (h->code == NM_CUSTOMDRAW) return tip_draw((NMTTCUSTOMDRAW *)lp);
+            if (h->code == TTN_SHOW) { tip_shape(g_tip); return FALSE; }
+            break;
+        }
+        if (h && h->idFrom == ID_PAC_LIST && h->code == NM_CUSTOMDRAW)
+            return pac_row_draw((NMLVCUSTOMDRAW *)lp);
         if (h && h->idFrom == ID_PAC_LIST) {
             if (h->code == LVN_ITEMCHANGED) layout(hwnd);
             else if (h->code == NM_DBLCLK && pac_selected() >= 0)
@@ -1048,10 +1174,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         fonts_create();
         set_fonts();
         SendMessageW(g_list,  LB_SETITEMHEIGHT, 0, (LPARAM)S(30));
-        SendMessageW(g_plist, LB_SETITEMHEIGHT, 0, (LPARAM)S(34));
-        ask_configure(draw_button, S, g_font, g_font_small,
-                      g_brush_bg, g_brush_surface, g_brush_line,
-                      CLR_TEXT, CLR_MUTED, CLR_SURFACE);
+        SendMessageW(g_plist, LB_SETITEMHEIGHT, 0, (LPARAM)S(44));
+        theme_ask();
         SetWindowPos(hwnd, NULL, sug->left, sug->top,
                      sug->right - sug->left, sug->bottom - sug->top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
@@ -1062,6 +1186,42 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_SIZE:
         layout(hwnd);
         return 0;
+
+    case WM_LBUTTONDOWN:
+        hl_click(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+        return 0;
+
+    case WM_SETCURSOR:
+        /* The letter strip is painted, not a control: show that it clicks. */
+        if ((HWND)wp == hwnd && LOWORD(lp) == HTCLIENT) {
+            POINT pt;
+            GetCursorPos(&pt);
+            ScreenToClient(hwnd, &pt);
+            if (hl_over_strip(pt.x, pt.y)) { SetCursor(LoadCursorW(NULL, IDC_HAND)); return TRUE; }
+        }
+        break;
+
+    case WM_GETMINMAXINFO: {
+        MINMAXINFO *mm = (MINMAXINFO *)lp;
+        RECT        want = { 0, 0, 0, 0 };
+        want.right = S(WIN_W_MIN); want.bottom = S(WIN_H_MIN);
+        AdjustWindowRectExForDpi(&want, WS_OVERLAPPEDWINDOW, FALSE, 0, (UINT)g_dpi);
+        mm->ptMinTrackSize.x = want.right - want.left;
+        mm->ptMinTrackSize.y = want.bottom - want.top;
+        {
+            /* At 250% on a 1080p screen the minimum is bigger than the
+               screen itself: never ask for more than the work area. */
+            RECT work;
+            if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0)) {
+                if (mm->ptMinTrackSize.x > work.right - work.left)
+                    mm->ptMinTrackSize.x = work.right - work.left;
+                if (mm->ptMinTrackSize.y > work.bottom - work.top)
+                    mm->ptMinTrackSize.y = work.bottom - work.top;
+            }
+        }
+        return 0;
+    }
+
 
     case WM_ERASEBKGND:
         return 1;
@@ -1090,7 +1250,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     HWND hwnd;
     MSG msg;
     RECT want;
-    DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+    /* WS_CLIPCHILDREN: the window's own painting must never cover its
+       controls - without it a repaint of the page (a background job
+       finishing, say) left them blank until the window was moved. */
+    DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
 
     (void)prev;
 
@@ -1110,6 +1273,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     if (FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)))
         return 1;
 
+    gfx_startup();
+    fonts_load_embedded();   /* before any font is created */
+    settings_load(&g_set);
+    theme_pick();
     brushes_create();
 
     wc.cbSize        = sizeof wc;
@@ -1122,7 +1289,17 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     if (!RegisterClassExW(&wc)) return 1;
 
     g_dpi = (int)GetDpiForSystem();
-    want.left = 0; want.top = 0; want.right = S(560); want.bottom = S(700);
+    {
+        /* The design size, trimmed to the work area: at 250% on a 1080p
+           screen even the minimum does not fit, and the page scrolls. */
+        RECT work;
+        int  w = S(WIN_W_DEF), h = S(WIN_H_DEF);
+        if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0)) {
+            if (w > work.right - work.left) w = work.right - work.left;
+            if (h > work.bottom - work.top - S(40)) h = work.bottom - work.top - S(40);
+        }
+        want.left = 0; want.top = 0; want.right = w; want.bottom = h;
+    }
     AdjustWindowRectExForDpi(&want, style, FALSE, 0, (UINT)g_dpi);
 
     hwnd = CreateWindowExW(0, wc.lpszClassName, L"Utgard", style,
@@ -1148,17 +1325,17 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
 
         if (g_prof_aside[0])
             StringCchPrintfW(msg, sizeof msg / sizeof msg[0],
-                L"Не удалось прочитать сохранённые профили: файл создан другой "
+                L"Не удалось прочитать сохранённые серверы: файл создан другой "
                 L"учётной записью Windows, на другом компьютере или более новой "
                 L"версией Utgard, либо повреждён.\n\n"
                 L"Файл не удалён: он переименован в %s рядом с utgard.exe. "
-                L"Список профилей начат заново.",
+                L"Список серверов начат заново.",
                 name ? name + 1 : g_prof_aside);
         else
             StringCchCopyW(msg, sizeof msg / sizeof msg[0],
-                L"Не удалось прочитать сохранённые профили (profiles.dat), и файл "
+                L"Не удалось прочитать сохранённые серверы (profiles.dat), и файл "
                 L"не получилось переименовать — возможно, он занят другой программой.\n\n"
-                L"Чтобы не перезаписать его, изменения профилей до перезапуска "
+                L"Чтобы не перезаписать его, изменения серверов до перезапуска "
                 L"Utgard сохраняться не будут.");
         problem(hwnd, msg);
     }
@@ -1173,5 +1350,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     fonts_destroy();
     brushes_destroy();
     CoUninitialize();
+    gfx_shutdown();
     return (int)msg.wParam;
 }

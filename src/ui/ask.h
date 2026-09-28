@@ -55,6 +55,18 @@ void ask_steps(HWND owner, const wchar_t *title, ask_step *steps, int count);
 
 /* Modal single-field prompt. Returns 1 when the user accepted a non-empty
    value, 0 on cancel or an empty field. */
+/* The window frame and field outlines follow the main window: a dark
+   caption on a dark palette in its colour, and fields drawn by the main
+   window's rounded-rectangle painter (anti-aliased there). */
+typedef void (*ask_round_fn)(HDC dc, const RECT *r, COLORREF fill, COLORREF border, int radius);
+void ask_configure_frame(int dark, COLORREF caption, COLORREF border, ask_round_fn round);
+
+/* A message in the client's own look instead of the system box: text and up
+   to three buttons, b1 the main one on the right. Returns 1, 2 or 3 for the
+   button pressed, 0 when the window was closed or Esc pressed. */
+int ask_message(HWND owner, const wchar_t *title, const wchar_t *text,
+                const wchar_t *b1, const wchar_t *b2, const wchar_t *b3);
+
 int ask_string(HWND owner, const wchar_t *title, const wchar_t *hint,
                const wchar_t *initial, wchar_t *out, size_t cap);
 

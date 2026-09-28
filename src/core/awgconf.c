@@ -52,14 +52,14 @@ int awgconf_build(const link_profile *p, const char *endpoint_ip,
     int         v6 = 0;
 
     if (cap) out[0] = '\0';
-    if (!p || p->proto != LINK_WG) return oops(err, errcap, "профиль не WireGuard");
+    if (!p || p->proto != LINK_WG) return oops(err, errcap, "сервер не WireGuard");
     if (!p->wg_private_key[0] || !p->wg_peer_key[0] || !p->wg_address[0])
-        return oops(err, errcap, "в профиле нет ключей или адреса интерфейса");
+        return oops(err, errcap, "в сервере нет ключей или адреса интерфейса");
     if (!one_line(p->wg_private_key) || !one_line(p->wg_peer_key) ||
         !one_line(p->wg_psk) || !one_line(p->wg_address))
-        return oops(err, errcap, "профиль AmneziaWG повреждён");
+        return oops(err, errcap, "сервер AmneziaWG повреждён");
     if (p->awg[0] && !link_awg_valid(p->awg))
-        return oops(err, errcap, "параметры AmneziaWG в профиле повреждены — добавьте профиль заново");
+        return oops(err, errcap, "параметры AmneziaWG в сервере повреждены — добавьте сервер заново");
     if (!endpoint_ip || !ip_literal(endpoint_ip, &v6))
         return oops(err, errcap, "адрес сервера AmneziaWG не разрешён в IP");
     if (p->port <= 0 || p->port > 65535) return oops(err, errcap, "неверный порт сервера");
@@ -79,7 +79,7 @@ int awgconf_build(const link_profile *p, const char *endpoint_ip,
             q += k;
             if (*q == ',') q++;
         }
-        if (!v4[0]) return oops(err, errcap, "в профиле нет IPv4-адреса интерфейса — IPv6 Utgard не поддерживает");
+        if (!v4[0]) return oops(err, errcap, "в сервере нет IPv4-адреса интерфейса — IPv6 Utgard не поддерживает");
         if (!add(out, cap, &n, "[Interface]\nPrivateKey = %s\nAddress = %s\n", p->wg_private_key, v4))
             goto small;
     }

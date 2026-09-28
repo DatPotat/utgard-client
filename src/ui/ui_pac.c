@@ -34,13 +34,12 @@ void pac_reload(void)
         ZeroMemory(&row, sizeof row);
         row.mask = LVIF_TEXT;
         row.iItem = i;
-        row.pszText = store.items[i].enabled ? L"Да" : L"Нет";
+        row.pszText = store.items[i].source;
         ListView_InsertItem(g_pac_list, &row);
-        ListView_SetItemText(g_pac_list, i, 1, store.items[i].source);
-        ListView_SetItemText(g_pac_list, i, 2, is_url(store.items[i].source) ? L"URL" : L"Файл");
-        StringCchPrintfW(state, 64, L"Готов · %lu КБ",
+        ListView_SetItemText(g_pac_list, i, 1, is_url(store.items[i].source) ? L"URL" : L"Файл");
+        StringCchPrintfW(state, 64, store.items[i].enabled ? L"Включён · %lu КБ" : L"Выключен · %lu КБ",
                          (unsigned long)((strlen(store.items[i].text) + 1023) / 1024));
-        ListView_SetItemText(g_pac_list, i, 3, state);
+        ListView_SetItemText(g_pac_list, i, 2, state);
         if (store.items[i].enabled) g_pac_count++;
     }
     pacstore_free(&store);
@@ -48,26 +47,7 @@ void pac_reload(void)
 
 static int pick_pac(HWND hwnd, wchar_t *path, size_t cap)
 {
-    IFileOpenDialog *dialog = NULL;
-    IShellItem *item = NULL;
-    PWSTR selected = NULL;
-    COMDLG_FILTERSPEC types[] = { { L"PAC (*.pac; *.js)", L"*.pac;*.js" }, { L"Все файлы", L"*.*" } };
-    int ok = 0;
-    if (FAILED(CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER,
-                                &IID_IFileOpenDialog, (void **)&dialog))) return 0;
-    IFileOpenDialog_SetOptions(dialog, FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR);
-    IFileOpenDialog_SetFileTypes(dialog, 2, types);
-    IFileOpenDialog_SetTitle(dialog, L"Добавить PAC");
-    g_modal++;
-    if (SUCCEEDED(IFileOpenDialog_Show(dialog, hwnd)) &&
-        SUCCEEDED(IFileOpenDialog_GetResult(dialog, &item)) &&
-        SUCCEEDED(IShellItem_GetDisplayName(item, SIGDN_FILESYSPATH, &selected)))
-        ok = SUCCEEDED(StringCchCopyW(path, cap, selected));
-    g_modal--;
-    CoTaskMemFree(selected);
-    if (item) IShellItem_Release(item);
-    IFileOpenDialog_Release(dialog);
-    return ok;
+    return pick_file(hwnd, L"Добавить PAC", L"PAC (*.pac; *.js)", L"*.pac;*.js", path, cap);
 }
 
 static int read_source(const pac_task *task, char **text, size_t *length,

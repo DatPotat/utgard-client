@@ -8,6 +8,10 @@
 2 ICON "utgard-tray-off.ico"
 3 ICON "utgard-tray-on.ico"
 
+/* Ruslan Display, SIL OFL 1.1, unmodified: the Khokhloma theme's titles.
+   Loaded for this process only (AddFontMemResourceEx), never installed. */
+200 RCDATA "fonts/RuslanDisplay-Regular.ttf"
+
 #define UTGARD_FILE_DESC "Utgard VPN client"
 #define UTGARD_FILE_NAME "utgard.exe"
 #include "versioninfo.rc"

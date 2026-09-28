@@ -9,27 +9,48 @@ static wchar_t g_names[ZAPRET_MAX_STRATEGIES][ZAPRET_NAME_MAX];
 /* Reload the strategy list from the current folder. */
 void strategies_reload(void)
 {
-    int i;
-
     SendMessageW(g_list, LB_RESETCONTENT, 0, 0);
     g_count = 0;
     if (!g_zap.valid) return;
 
     g_count = zapret_list(g_zap.path, g_names, ZAPRET_MAX_STRATEGIES);
     if (g_count > ZAPRET_MAX_STRATEGIES) g_count = ZAPRET_MAX_STRATEGIES;
-
-    for (i = 0; i < g_count; i++)
-        SendMessageW(g_list, LB_ADDSTRING, 0, (LPARAM)g_names[i]);
-
-    if (g_count) SendMessageW(g_list, LB_SETCURSEL, 0, 0);
+    strategies_filter();
 }
+
+/* The list shows the strategies whose name holds the search text; g_shown
+   maps a row back to its strategy. The running one is selected when shown. */
+static int g_shown[ZAPRET_MAX_STRATEGIES], g_shown_n;
+
+void strategies_filter(void)
+{
+    wchar_t needle[64];
+    int     i, pick = 0;
+
+    GetWindowTextW(g_zap_search, needle, 64);
+    CharLowerW(needle);
+    SendMessageW(g_list, LB_RESETCONTENT, 0, 0);
+    g_shown_n = 0;
+    for (i = 0; i < g_count; i++) {
+        wchar_t low[ZAPRET_NAME_MAX];
+        StringCchCopyW(low, ZAPRET_NAME_MAX, g_names[i]);
+        CharLowerW(low);
+        if (needle[0] && !wcsstr(low, needle)) continue;
+        if (g_status.strategy[0] && _wcsicmp(g_names[i], g_status.strategy) == 0) pick = g_shown_n;
+        g_shown[g_shown_n++] = i;
+        SendMessageW(g_list, LB_ADDSTRING, 0, (LPARAM)g_names[i]);
+    }
+    if (g_shown_n) SendMessageW(g_list, LB_SETCURSEL, (WPARAM)pick, 0);
+}
+
+int strategies_shown(void) { return g_shown_n; }
 
 /* Name of the strategy highlighted in the list, or NULL when none is. */
 const wchar_t *selected_strategy(void)
 {
     LRESULT i = SendMessageW(g_list, LB_GETCURSEL, 0, 0);
-    if (i == LB_ERR || i < 0 || i >= g_count) return NULL;
-    return g_names[i];
+    if (i == LB_ERR || i < 0 || i >= g_shown_n) return NULL;
+    return g_names[g_shown[i]];
 }
 
 static void zap_done(HWND hwnd, long_job *j)
@@ -207,7 +228,7 @@ static void done_zap_fix(HWND hwnd, long_job *j)
     /* winws rereads the list on its own, but keeps the verdict of a connection
        it has already seen: the tunnel must redial to be left alone. */
     if (g_vpn_on)
-        MessageBoxW(hwnd, L"Адреса серверов добавлены в исключения zapret. "
+        modal_box(hwnd, L"Адреса серверов добавлены в исключения zapret. "
                           L"Выключите и снова включите VPN, чтобы уже открытое "
                           L"соединение пошло мимо zapret.",
                     L"Utgard", MB_ICONINFORMATION | MB_OK);
@@ -219,7 +240,7 @@ void act_zapret_fix(HWND hwnd)
 
     if (g_busy) return;
     if (!g_zap.valid) { problem(hwnd, L"Сначала укажите папку zapret"); return; }
-    if (g_prof.count == 0) { problem(hwnd, L"Нет профилей — нечего исключать"); return; }
+    if (g_prof.count == 0) { problem(hwnd, L"Нет серверов — нечего исключать"); return; }
 
     j = job_new(work_zap_fix, done_zap_fix);
     if (j) {
@@ -239,6 +260,32 @@ void act_zap_game(HWND hwnd)
                           : (m == GAME_TCP) ? GAME_UDP : GAME_OFF;
 
     if (!zapret_game_set(g_zap.path, next)) {
+        problem(hwnd, L"Не удалось изменить режим игрового фильтра");
+        return;
+    }
+    g_zap_dirty = 1;
+    layout(hwnd);
+}
+
+/* Straight to a mode: zapret only offers the loaded -> none -> any
+   rotation, so step it until the mode is the one asked for (two steps at
+   most). */
+void act_zap_ipset_to(HWND hwnd, int mode)
+{
+    wchar_t err[320] = { 0 };
+    int     k;
+    for (k = 0; k < 3 && (int)zapret_ipset_get(g_zap.path) != mode; k++)
+        if (!zapret_ipset_cycle(g_zap.path, err, 320)) {
+            problem(hwnd, err[0] ? err : L"Не удалось переключить режим IPSet");
+            break;
+        }
+    layout(hwnd);
+}
+
+void act_zap_game_to(HWND hwnd, int mode)
+{
+    if ((int)zapret_game_get(g_zap.path) == mode) return;
+    if (!zapret_game_set(g_zap.path, (zapret_game_mode)mode)) {
         problem(hwnd, L"Не удалось изменить режим игрового фильтра");
         return;
     }
@@ -291,7 +338,7 @@ static void done_hosts_check(HWND hwnd, long_job *j)
     }
 
     if (!j->n1) {
-        MessageBoxW(hwnd, L"Файл hosts уже соответствует репозиторию.",
+        modal_box(hwnd, L"Файл hosts уже соответствует репозиторию.",
                     L"Utgard", MB_ICONINFORMATION | MB_OK);
         DeleteFileW(temp);
         return;
@@ -300,7 +347,7 @@ static void done_hosts_check(HWND hwnd, long_job *j)
     /* The system hosts file is never written by us, exactly as service.bat
        does it: the downloaded text is opened and the real file is revealed,
        and the copying is left to the user. */
-    MessageBoxW(hwnd,
+    modal_box(hwnd,
         L"Файл hosts отличается от репозитория.\n\n"
         L"Сейчас откроется скачанный файл и папка с системным hosts — "
         L"скопируйте содержимое вручную. Сам системный файл клиент не меняет.",
@@ -363,7 +410,7 @@ void on_pick_path(HWND hwnd)
     if (!zapret_scan(chosen, &scanned)) {
         /* A bad pick must not destroy a folder that already works. */
         if (g_zap.valid) {
-            MessageBoxW(hwnd, scanned.problem, L"Папка не подходит",
+            modal_box(hwnd, scanned.problem, L"Папка не подходит",
                         MB_ICONWARNING | MB_OK);
             return;
         }

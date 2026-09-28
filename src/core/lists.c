@@ -63,7 +63,7 @@ static int starts(const char *s, const char *p)
    ad-block decorations, everything after the first slash or space, and
    lowercase what is left. IPs and CIDRs are returned untouched, because the
    slash cleanup would turn 203.0.113.0/24 into a single host. */
-static int normalize(const char *raw, char *out, size_t cap)
+int lists_normalize(const char *raw, char *out, size_t cap)
 {
     char buf[LIST_ENTRY_MAX * 2];
     char *hash, *slash, *space;
@@ -187,7 +187,7 @@ int lists_build_text(const char *in, char *out, size_t outcap, lists_stats *st)
         char entry[LIST_ENTRY_MAX];
         int  j, seen = 0, r;
 
-        r = normalize(raw[i], entry, sizeof entry);
+        r = lists_normalize(raw[i], entry, sizeof entry);
         if (r < 0) { if (st) st->invalid++; continue; }
         if (r == 0) continue;
 
@@ -284,7 +284,7 @@ int lists_tidy_text(const char *in, char *out, size_t outcap, int *removed)
             line[len] = '\0';
             trim(line);
             if (line[0] && line[0] != '#') {
-                if (normalize(line, entry, sizeof entry) != 1) {
+                if (lists_normalize(line, entry, sizeof entry) != 1) {
                     gone++;
                 } else {
                     for (j = 0; j < n; j++)
@@ -329,7 +329,7 @@ int lists_tidy_text(const char *in, char *out, size_t outcap, int *removed)
                 emit = line;
             } else {
                 char entry[LIST_ENTRY_MAX];
-                if (normalize(line, entry, sizeof entry) == 1 &&
+                if (lists_normalize(line, entry, sizeof entry) == 1 &&
                     i < n && strcmp(kept[i], entry) == 0) {
                     emit = kept[i];
                     i++;

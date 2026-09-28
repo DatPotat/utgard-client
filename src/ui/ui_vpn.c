@@ -211,7 +211,7 @@ int subscription_apply(HWND hwnd, const wchar_t *url,
        so the count in the header is enough. A full list is worth a warning. */
     if (dropped && !silent) {
         StringCchPrintfW(msg, 320,
-                         L"Загружено профилей: %d, ещё %d не поместилось — "
+                         L"Загружено серверов: %d, ещё %d не поместилось — "
                          L"список заполнен.", added, dropped);
         problem(hwnd, msg);
     }
@@ -239,11 +239,13 @@ void act_subscription(HWND hwnd)
     /* A job may be switching profiles by index: no renumbering meanwhile. */
     if (g_sub_busy || g_busy) return;
 
-    to_wide(g_prof.subscription, current, PROFILE_SRC);
+    /* The field starts empty (Anton, 2026-09-28): the old address stays in
+       use until a new one is entered, and is not put in front of the user. */
+    (void)current;
     if (!ask_string(hwnd, L"Подписка",
-                    L"Адрес подписки — профили из неё будут обновляться целиком, "
+                    L"Адрес подписки — серверы из неё будут обновляться целиком, "
                     L"добавленные вручную останутся",
-                    current[0] ? current : NULL, url, 2048))
+                    NULL, url, 2048))
         return;
 
     job = (sub_job *)calloc(1, sizeof *job);
@@ -383,18 +385,18 @@ static const wchar_t *awg_question(int resume)
     if (!resume && (!coredir_path(&CORE_AWG, dir, MAX_PATH * 2) || !coredir_volume_has_acl(dir)))
         return NULL;
     return resume
-            ? L"Для профиля AmneziaWG нужно ядро AmneziaWG — официальный пакет "
+            ? L"Для сервера AmneziaWG нужно ядро AmneziaWG — официальный пакет "
               L"amneziawg-windows-client с GitHub.\n\n"
               L"Программа проверит его контрольную сумму и возьмёт из него два файла "
               L"в папку amneziawg рядом с собой. В систему ничего не устанавливается; "
               L"во время работы туннеля программа создаёт службу и сетевой адаптер "
               L"и удаляет их при выключении.\n\nСкачать сейчас?"
-            : L"Не найдено ядро AmneziaWG — без него не работают профили AmneziaWG.\n\n"
+            : L"Не найдено ядро AmneziaWG — без него не работают серверы AmneziaWG.\n\n"
               L"Скачать его сейчас? Это официальный пакет amneziawg-windows-client с "
               L"GitHub: программа проверит его контрольную сумму и возьмёт из него два "
               L"файла в папку amneziawg. В систему ничего не устанавливается.\n\n"
-              L"Если профили AmneziaWG не нужны, можно отказаться — программа спросит "
-              L"снова, когда такой профиль понадобится.";
+              L"Если серверы AmneziaWG не нужны, можно отказаться — программа спросит "
+              L"снова, когда такой сервер понадобится.";
 }
 
 static void awg_install_start(HWND hwnd, int resume)
@@ -580,7 +582,7 @@ static int plan_prepare(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
     int                 idx = which == VPN_NEW ? v->target : v->prev;
 
     if (idx < 0 || idx >= v->store.count) {
-        StringCchCopyW(msg, cap, L"Профиль не найден");
+        StringCchCopyW(msg, cap, L"Сервер не найден");
         return 0;
     }
     job_stage(v->job, L"Проверка конфигурации…");
@@ -745,7 +747,7 @@ static void done_vpn(HWND hwnd, long_job *j)
         if (j->ok) {
             g_prof.active = v->target;
             if (!profiles_save(&g_prof))
-                problem(hwnd, L"Профиль переключён, но сохранить выбор не удалось");
+                problem(hwnd, L"Сервер переключён, но сохранить выбор не удалось");
         }
         g_switch_pending = -1;
         SendMessageW(g_plist, LB_SETCURSEL, (WPARAM)g_prof.active, 0);
@@ -768,7 +770,7 @@ static long_job *vpn_job(HWND hwnd, job_work work, int target)
     vpn_inputs *v;
 
     if (g_prof.count == 0 || target < 0 || target >= g_prof.count) {
-        problem(hwnd, L"Сначала добавьте профиль");
+        problem(hwnd, L"Сначала добавьте сервер");
         return NULL;
     }
 
@@ -899,7 +901,7 @@ void vpn_restart(HWND hwnd, int target)
     j = vpn_job(hwnd, work_vpn_restart, target);
     if (!j) return;
     ((vpn_inputs *)j->extra)->switching = 1;
-    job_start(hwnd, L"Переключение профиля…", j);
+    job_start(hwnd, L"Переключение сервера…", j);
 }
 
 void act_vpn(HWND hwnd)
@@ -918,11 +920,11 @@ void act_vpn(HWND hwnd)
 static void profile_add_parsed(HWND hwnd, const link_profile *parsed)
 {
     if (g_prof.count >= PROFILES_MAX) {
-        problem(hwnd, L"Больше профилей не помещается");
+        problem(hwnd, L"Больше серверов не помещается");
         return;
     }
     if (profile_duplicate(parsed) >= 0) {
-        problem(hwnd, L"Такой профиль уже есть в списке");
+        problem(hwnd, L"Такой сервер уже есть в списке");
         return;
     }
 
@@ -932,7 +934,7 @@ static void profile_add_parsed(HWND hwnd, const link_profile *parsed)
     g_prof.count++;
 
     if (!profiles_save(&g_prof))
-        problem(hwnd, L"Профиль добавлен, но сохранить его не удалось");
+        problem(hwnd, L"Сервер добавлен, но сохранить его не удалось");
 
     profiles_reload();
     ping_start(hwnd);
@@ -952,7 +954,7 @@ static void profile_add_link(HWND hwnd)
     char                err[256];
     wchar_t             msg[320];
 
-    if (!ask_string(hwnd, L"Добавить профиль",
+    if (!ask_string(hwnd, L"Добавить сервер",
                     L"Ссылка vless, vmess, hysteria2, ss, trojan, wireguard или vpn:// (Amnezia)",
                     NULL, wide, sizeof wide / sizeof wide[0]))
         return;
@@ -1039,17 +1041,16 @@ void act_profile_add(HWND hwnd)
     int   cmd;
 
     if (g_busy) return;
-    menu = CreatePopupMenu();
-    if (!menu) return;
-    AppendMenuW(menu, MF_STRING, 1, L"Вставить ссылку…");
-    AppendMenuW(menu, MF_STRING, 2, L"Файл WireGuard / AmneziaWG (.conf)…");
-    GetWindowRect(g_prof_add, &r);
-    cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_BOTTOMALIGN,
-                         r.left, r.top, 0, hwnd, NULL);
-    DestroyMenu(menu);
-
-    if (cmd == 1) profile_add_link(hwnd);
-    else if (cmd == 2) profile_add_wgconf(hwnd);
+    {
+        static const wchar_t *const items[2] = {
+            L"Вставить ссылку…", L"Файл WireGuard / AmneziaWG (.conf)…" };
+        (void)menu;
+        GetWindowRect(g_prof_add, &r);
+        /* Under the button, right edges lined up, rounded like the rest. */
+        cmd = popup_choose(hwnd, &r, items, 2, -1, 1);
+    }
+    if (cmd == 0) profile_add_link(hwnd);
+    else if (cmd == 1) profile_add_wgconf(hwnd);
 }
 
 void act_profile_delete(HWND hwnd)
@@ -1066,7 +1067,7 @@ void act_profile_delete(HWND hwnd)
     else if (g_prof.active > i)  g_prof.active--;
 
     if (!profiles_save(&g_prof))
-        problem(hwnd, L"Профиль удалён, но сохранить изменение не удалось");
+        problem(hwnd, L"Сервер удалён, но сохранить изменение не удалось");
 
     profiles_reload();
     ping_start(hwnd);
@@ -1086,7 +1087,7 @@ void act_profile_activate(HWND hwnd)
     if (!g_vpn_on) {
         g_prof.active = i;
         if (!profiles_save(&g_prof))
-            problem(hwnd, L"Профиль выбран, но сохранить выбор не удалось");
+            problem(hwnd, L"Сервер выбран, но сохранить выбор не удалось");
     } else {
         /* The running tunnel keeps its profile until the new one runs
            (done_vpn). A download of the AmneziaWG core, if that is what

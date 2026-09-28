@@ -43,6 +43,8 @@ run test_genconf   test_genconf.c ../src/core/genconf.c ../src/core/defconfig.c 
 run test_pac       test_pac.c $PAC
 run test_lists     test_lists.c ../src/core/lists.c ../vendor/parson/parson.c
 run test_update    test_update.c ../src/core/update.c
+run test_svgpath   test_svgpath.c ../src/core/svgpath.c -lm
+run test_hostlist  test_hostlist.c ../src/core/hostlist.c ../src/core/lists.c ../vendor/parson/parson.c
 run fuzz_link      fuzz_link.c $LINK
 
 if [ -n "${SINGBOX:-}" ] && [ -f out/genconf_awg.json ]; then

@@ -34,25 +34,45 @@
 #include <commctrl.h>
 #include <windowsx.h>
 
-/* ---- palette ------------------------------------------------------- */
+/* ---- palette -------------------------------------------------------
+   Chosen at run time: light or dark, after Windows unless the user picked
+   one in the settings. The CLR_* names stay the ones the pages were written
+   with; each is a field of the current palette. Contrast of every text and
+   border pair is checked against WCAG AA (see the redesign document). */
 
-#define CLR_BG        RGB(0x1F, 0x21, 0x34)
-#define CLR_FOOTER    RGB(0x1A, 0x1C, 0x2C)
-#define CLR_SURFACE   RGB(0x2C, 0x2E, 0x40)
-#define CLR_LINE      RGB(0x3A, 0x3C, 0x4C)
-#define CLR_TEXT      RGB(0xE8, 0xEA, 0xF0)
-#define CLR_MUTED     RGB(0x88, 0x9E, 0xA8)
-#define CLR_ACCENT    RGB(0xFF, 0xDE, 0x7D)
-#define CLR_ACCENT_LO RGB(0xD9, 0xBB, 0x63)   /* accent, pressed */
-#define CLR_ACCENT_HI RGB(0xFF, 0xE9, 0xA6)   /* accent, under the pointer */
-#define CLR_OK        RGB(0xBA, 0xD8, 0x9A)
-#define CLR_WARN      RGB(0xA8, 0x6B, 0x86)
-#define CLR_WARN_LO   RGB(0x8F, 0x5B, 0x72)   /* warn, pressed: as accent, x0.85 */
-#define CLR_WARN_HI   RGB(0xC5, 0x9B, 0xAE)   /* warn, under the pointer: 1/3 to white */
+typedef struct {
+    COLORREF bg, side, surface, text, muted;
+    COLORREF accent, accent_lo, accent_hi, on_accent, tint;
+    COLORREF warn, warn_lo, warn_hi, line, border, hover;
+} ui_palette;
+extern ui_palette g_pal;
+extern int        g_dark;
+
+#define CLR_BG        (g_pal.bg)
+#define CLR_SIDE      (g_pal.side)
+#define CLR_FOOTER    (g_pal.side)
+#define CLR_SURFACE   (g_pal.surface)
+#define CLR_LINE      (g_pal.line)
+#define CLR_BORDER    (g_pal.border)
+#define CLR_TEXT      (g_pal.text)
+#define CLR_MUTED     (g_pal.muted)
+#define CLR_ACCENT    (g_pal.accent)
+#define CLR_ACCENT_LO (g_pal.accent_lo)
+#define CLR_ACCENT_HI (g_pal.accent_hi)
+#define CLR_ON_ACCENT (g_pal.on_accent)
+#define CLR_TINT      (g_pal.tint)
+#define CLR_HOVER     (g_pal.hover)
+#define CLR_OK        (g_pal.accent)
+#define CLR_WARN      (g_pal.warn)
+#define CLR_WARN_LO   (g_pal.warn_lo)
+#define CLR_WARN_HI   (g_pal.warn_hi)
 /* ---- control ids ---------------------------------------------------- */
 
-#define ID_TAB_UTGARD 101
-#define ID_TAB_ZAPRET 102
+#define ID_NAV_FIRST  101   /* + NAV_*: the sidebar sections */
+#define ID_ROW_SERVER 110   /* connection page: the server row */
+#define ID_TAB_SITES  111   /* routing page: its three tabs */
+#define ID_TAB_APPS   112
+#define ID_TAB_PAC    113
 #define ID_TOGGLE     201
 #define ID_PICK_PATH  301
 #define ID_STRATEGIES 302
@@ -104,6 +124,8 @@
 #define ID_ED_PATH     860
 #define ID_ED_PPLUS    880
 #define ID_ED_PMINUS   900
+#define ID_ED_PBROWSE  1300
+#define ID_SEL_FIRST   1400   /* + SEL_*: the drop-down fields of the settings */   /* + row: the folder button inside a path field */
 #define ID_ED_BACK     920
 #define ID_ED_SAVE     921
 #define ID_SET_OPEN    950
@@ -121,6 +143,26 @@
 #define ID_SET_V_UTGARD  964   /* version links on the settings page */
 #define ID_SET_V_SINGBOX 965
 #define ID_SET_V_AWG     966
+#define ID_SET_THEME   967
+#define ID_SET_ADV     968
+#define ID_ZG_FIRST    1200   /* zapret: game filter chips, GAME_* order */
+#define ID_ZI_FIRST    1210   /* zapret: IPSet chips: none, loaded, any */
+#define ID_ZAP_SEARCH  1220
+#define ID_ZAP_AGAIN   1221
+#define ID_HL_SEARCH   1100   /* the site list page */
+#define ID_HL_LIST     1101
+#define ID_HL_ADD      1102
+#define ID_HL_MODE     1103
+#define ID_HL_DEL      1104
+#define ID_HL_CLEAR    1105
+#define ID_HL_UNDO     1106
+#define ID_HL_PASTE    1107
+#define ID_HL_ADD_OK   1108
+#define ID_HL_ADD_CANCEL 1109
+#define ID_HL_MOVE     1110
+#define ID_HL_SCLEAR   1111
+#define ID_HL_TBACK    1112
+#define ID_ZAP_SCLEAR  1222
 #define ID_PING_NOW    959
 #define ID_ZAP_LIST    960
 #define LIST_TEXT_MAX 262144
@@ -146,17 +188,31 @@
 #define UTG_DWMWA_CAPTION_COLOR           35
 /* ---- layout --------------------------------------------------------- */
 
-#define TABS_H   S(40)
-#define FOOTER_H S(38)
-#define PAD      S(18)
+/* The page area starts right of the sidebar: layout moves controls by g_ox
+   and painting shifts its origin by it. TABS_H is where a page's own
+   content begins - below the routing tabs on the routing pages. */
+extern int g_ox;
+int tabs_top(void);
+#define TABS_H   tabs_top()
+#define FOOTER_H S(56)
+#define PAD      S(24)
+#define SIDE_W(rail) ((rail) ? S(112) : S(232))
+#define RAIL_BELOW   920    /* DIP: narrower windows get the icon rail */
+#define WIN_W_DEF    1040
+#define WIN_H_DEF    640
+#define WIN_W_MIN    760
+#define WIN_H_MIN    520
 #define APP_ZONE_TOGGLE 96
 #define APP_ZONE_DELETE 84
 
 /* button kinds, stored in GWLP_USERDATA */
-enum { BK_TAB = 0, BK_PRIMARY, BK_SECONDARY, BK_DANGER, BK_CHECK, BK_LINK };
+enum { BK_TAB = 0, BK_PRIMARY, BK_SECONDARY, BK_DANGER, BK_CHECK, BK_LINK, BK_NAV, BK_ROW, BK_CHIP, BK_ICON, BK_SELECT };
+enum { BACK_PAGE = 0, BACK_CARD, BACK_ACCENT, BACK_FOOTER, BACK_TINT };
+enum { NAV_CONNECT = 0, NAV_SERVERS, NAV_ROUTING, NAV_ZAPRET, NAV_SETTINGS, NAV_COUNT };
+enum { STATE_OFF = 0, STATE_WAIT, STATE_ON, STATE_ERROR };
 /* pages */
 enum { PAGE_UTGARD = 0, PAGE_ZAPRET, PAGE_APPS, PAGE_HOSTS, PAGE_PICK, PAGE_EDIT,
-       PAGE_SETTINGS, PAGE_PAC };
+       PAGE_SETTINGS, PAGE_PAC, PAGE_SERVERS };
 /* The list page serves two files: the VPN site list, compiled for sing-box,
    and zapret's own list-general-user.txt, which zapret reads as plain text. */
 enum { HOSTS_VPN = 0, HOSTS_ZAPRET };
@@ -230,8 +286,12 @@ typedef struct {
 extern int g_dpi;
 extern int g_page;
 extern HFONT g_font, g_font_big, g_font_small;
+extern HFONT g_font_bold, g_font_small_bold, g_font_title, g_font_deco;
+void  fonts_load_embedded(void);
+HFONT title_font(void);
+extern HWND g_nav[NAV_COUNT], g_row_server, g_tab_sites, g_tab_apps, g_tab_pac, g_set_theme;
 extern HBRUSH g_brush_bg, g_brush_footer, g_brush_surface, g_brush_line;
-extern HWND g_tab_utgard, g_tab_zapret, g_toggle, g_pick_path, g_list;
+extern HWND g_toggle, g_pick_path, g_list;
 extern HWND g_zap_start, g_zap_stop, g_zap_restart;
 extern HWND g_plist, g_prof_add, g_prof_del, g_prof_sub;
 extern int g_sub_busy;
@@ -260,6 +320,7 @@ extern int g_pk_view[PICK_MAX];
 extern int g_pk_view_n;
 extern int g_pk_checked_n;
 extern HWND g_ed_name[ED_ROWS], g_ed_nplus[ED_ROWS], g_ed_nminus[ED_ROWS];
+extern HWND g_ed_pbrowse[ED_ROWS];
 extern HWND g_ed_path[ED_ROWS], g_ed_pplus[ED_ROWS], g_ed_pminus[ED_ROWS];
 extern HWND g_ed_back, g_ed_save;
 extern int g_ed_ncount, g_ed_pcount;
@@ -300,17 +361,100 @@ void fill(HDC dc, int x, int y, int w, int h, HBRUSH br);
 void text_at(HDC dc, int x, int y, int w, int h, const wchar_t *s, COLORREF color, HFONT font, UINT flags);
 void dot(HDC dc, int cx, int cy, int r, COLORREF color);
 void rounded(HDC dc, const RECT *r, COLORREF fillc, COLORREF border);
+void rounded_r(HDC dc, const RECT *r, COLORREF fillc, COLORREF border, int radius);
+
+/* ---- ui_scroll.c ---- */
+void scroll_attach(HWND target);
+void scroll_place(HWND target);
+void scroll_sync(HWND target);
+
+/* ---- ui_popup.c ---- */
+enum { SEL_DNS = 0, SEL_SUB, SEL_THEME, SEL_LOG, SEL_STACK, SEL_COUNT };
+extern HWND g_sel[SEL_COUNT];
+int  popup_choose(HWND owner, const RECT *anchor, const wchar_t *const *items, int n,
+                  int current, int align_right);
+void select_open(HWND owner, HWND field, HWND combo);
+LRESULT tip_draw(NMTTCUSTOMDRAW *cd);
+void    tip_shape(HWND tip);
+void    pac_columns(int width, int *x_type, int *x_state);
+LRESULT pac_row_draw(NMLVCUSTOMDRAW *cd);
+
+/* ---- ui_menu.c ---- */
+HMENU menu_create(void);
+void  menu_add(HMENU m, UINT id, const wchar_t *text, int grayed);
+void  menu_separator(HMENU m);
+int   menu_measure(MEASUREITEMSTRUCT *mi);
+int   menu_draw(const DRAWITEMSTRUCT *d);
+int   pick_file(HWND hwnd, const wchar_t *title, const wchar_t *filter_name,
+                const wchar_t *filter_spec, wchar_t *path, size_t cap);
+
+/* ---- ui_gfx.c ---- */
+#include "icons_lucide.h"
+void gfx_startup(void);
+void gfx_shutdown(void);
+void gfx_icon(HDC dc, int icon, int x, int y, int size, COLORREF color);
 void draw_button(const DRAWITEMSTRUCT *d);
+
+/* ---- ui_theme.c ---- */
+
+void theme_pick(void);
+int  theme_system_is_dark(void);
+void theme_apply(HWND hwnd);
+void theme_caption(HWND hwnd);
+int  nav_section(void);
+int  nav_rail(HWND hwnd);
+void nav_layout(HWND hwnd);
+void draw_nav(const DRAWITEMSTRUCT *d);
+void state_icon(HDC dc, int kind, int cx, int cy, int r, int inv);
+int  vpn_state(void);
+void paint_sidebar(HDC dc, const RECT *client);
+void theme_ask(void);
+
+/* ---- ui_hostlist.c ---- */
+
+extern HWND g_hl_search, g_hl_list, g_hl_add, g_hl_mode, g_hl_del, g_hl_clear, g_hl_undo;
+extern HWND g_hl_paste, g_hl_add_ok, g_hl_add_cancel, g_hl_move, g_hl_sclear, g_zap_sclear, g_hl_tback;
+void search_frame(HDC dc, HWND edit);
+void field_frame(HDC dc, HWND edit, int extra_right);
+void search_clear_place(HWND edit, HWND clear, int x, int y, int w, void (*place)(HWND, int, int, int, int));
+void hl_create(HWND hwnd);
+void hl_fonts(void);
+void hl_open(void);
+void hl_reload(void);
+void hl_layout(const RECT *c, void (*place)(HWND, int, int, int, int));
+void hl_paint(HDC dc, const RECT *c);
+void draw_host_row(const DRAWITEMSTRUCT *d);
+int  hl_command(HWND hwnd, int id, int code);
+LRESULT CALLBACK hl_list_proc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR ref);
+void hl_click(int x, int y);
+int  hl_over_strip(int x, int y);
+int  page_leave_ok(HWND hwnd);
 
 /* ---- ui_layout.c ---- */
 
+/* The connection page's geometry, shared by layout and paint. */
+typedef struct { RECT block; int colw, rx, ry, one_col; } conn_geo;
+void connect_geometry(const RECT *c, conn_geo *g);
+/* The zapret page, likewise. */
+typedef struct {
+    int  banner, y0, lw, rx, rw;
+    RECT status;
+    int  strat, search, list_top, list_bottom, start;
+    int  compat, filters, lists;
+} zap_geo;
+void zapret_geometry(const RECT *c, zap_geo *g);
+/* The settings page. */
+typedef struct { int y0, colw, lx, rx, launch, conn, look, adv; } set_geo;
+void settings_geometry(const RECT *c, set_geo *g);
 void layout(HWND hwnd);
+int  caption_width(HWND b);
 
 /* ---- ui_paint.c ---- */
 
 void on_paint(HWND hwnd);
 void draw_strategy(const DRAWITEMSTRUCT *d);
 void draw_profile(const DRAWITEMSTRUCT *d);
+void server_columns(int width, int *x_proto, int *x_host, int *x_ping);
 int app_zone_at(int x, int width);
 void draw_app_row(const DRAWITEMSTRUCT *d);
 void draw_pick_row(const DRAWITEMSTRUCT *d);
@@ -318,6 +462,7 @@ void draw_pick_row(const DRAWITEMSTRUCT *d);
 /* ---- ui_common.c ---- */
 
 void to_wide(const char *src, wchar_t *dst, int cap);
+const wchar_t *plural_ru(long n, const wchar_t *one, const wchar_t *few, const wchar_t *many);
 int status_refresh(void);
 void problem(HWND hwnd, const wchar_t *text);
 int modal_box(HWND hwnd, const wchar_t *text, const wchar_t *title, UINT flags);
@@ -334,6 +479,13 @@ void after_action(HWND hwnd);
 /* ---- ui_zapret.c ---- */
 
 void strategies_reload(void);
+void strategies_filter(void);
+int  strategies_shown(void);
+void act_zap_game_to(HWND hwnd, int mode);
+void act_zap_ipset_to(HWND hwnd, int mode);
+extern HWND g_set_adv;
+extern int  g_set_adv_open;
+extern HWND g_zap_search, g_zap_again, g_zg[4], g_zi[3];
 const wchar_t *selected_strategy(void);
 void act_stop(HWND hwnd);
 void act_start(HWND hwnd, const wchar_t *name);
@@ -373,6 +525,8 @@ void lists_refresh_counts(void);
 void hosts_open(HWND hwnd, int mode);
 void hosts_save_zapret(HWND hwnd);
 void hosts_save_start(HWND hwnd, int leave_after);
+void hosts_save_vpn_text(HWND hwnd, const char *utf8);
+int  zapret_user_list(wchar_t *out, size_t cap);
 void hosts_tidy(HWND hwnd);
 void hosts_back(HWND hwnd);
 void act_edit_hosts(HWND hwnd);

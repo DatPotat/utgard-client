@@ -643,9 +643,9 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
         return oops(err, errcap, "Генератору не переданы обязательные пути");
     s = in->store;
     if (s->count <= 0)
-        return oops(err, errcap, "Нет ни одного профиля");
+        return oops(err, errcap, "Нет ни одного сервера");
     if (s->active < 0 || s->active >= s->count)
-        return oops(err, errcap, "Не выбран активный профиль");
+        return oops(err, errcap, "Не выбран активный сервер");
 
     {
         FILE *probe = open_utf8(in->base_path, "rb");
@@ -812,7 +812,7 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
             free_overlays(ovl, novl);
             return oops(err, errcap, active_awg
                 ? "Туннель AmneziaWG не поднят"
-                : "Активный профиль неизвестного типа");
+                : "Активный сервер неизвестного типа");
         }
 
         {

@@ -43,6 +43,7 @@ void settings_defaults(app_settings *s)
     s->dns           = SETTINGS_DNS_DEFAULT;
     s->tray_on_close = 1;
     s->update_check  = 1;
+    s->theme         = SETTINGS_THEME_UNSET;
     s->sub_interval  = SETTINGS_SUB_DEFAULT;
     s->sub_last      = 0;
     s->pac_last      = 0;
@@ -114,6 +115,8 @@ int settings_load(app_settings *s)
             s->tray_on_close = (eq[1] == '1');
         } else if (strcmp(line, "update_check") == 0) {
             s->update_check = (eq[1] == '1');
+        } else if (strcmp(line, "theme") == 0) {
+            if (eq[1] >= '0' && eq[1] <= '3') s->theme = eq[1] - '0';
         } else if (strcmp(line, "sub_interval_hours") == 0) {
             long v = strtol(eq + 1, NULL, 10);
             int  i;
@@ -145,10 +148,11 @@ int settings_save(const app_settings *s)
 
     if (!settings_path(path, MAX_PATH * 2)) return 0;
     if (FAILED(StringCchPrintfA(buf, sizeof buf,
-            "mtu=%d\r\nlog_level=%s\r\nstack=%s\r\ndns=%s/%s\r\ntray_on_close=%d\r\nupdate_check=%d\r\n"
+            "mtu=%d\r\nlog_level=%s\r\nstack=%s\r\ndns=%s/%s\r\ntray_on_close=%d\r\nupdate_check=%d\r\ntheme=%d\r\n"
             "sub_interval_hours=%d\r\nsub_last=%lld\r\npac_last=%lld\r\n",
             s->mtu, settings_log_levels[lvl], settings_stacks[stk],
             settings_dns[dns].host, settings_dns[dns].type, s->tray_on_close ? 1 : 0, s->update_check ? 1 : 0,
+            (s->theme >= 0 && s->theme <= 3) ? s->theme : 0,
             settings_sub_hours[sub], s->sub_last, s->pac_last)))
         return 0;
 
