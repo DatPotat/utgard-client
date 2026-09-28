@@ -21,9 +21,10 @@ void fonts_create(void)
 {
     g_font       = make_font(105, FW_NORMAL);     /* 10.5 pt */
     g_font_big   = make_font(120, FW_SEMIBOLD);   /* 12 pt   */
-    g_font_small = make_font(90,  FW_NORMAL);     /* 9 pt    */
+    g_font_small = make_font(100, FW_NORMAL);     /* 10 pt   */
+    g_font_meta  = make_font(90,  FW_NORMAL);     /* 9 pt: metadata only (versions, paths, addresses) */
     g_font_bold  = make_font(105, FW_SEMIBOLD);
-    g_font_small_bold = make_font(90, FW_SEMIBOLD);
+    g_font_small_bold = make_font(100, FW_SEMIBOLD);
     g_font_title = make_font(165, FW_SEMIBOLD);   /* 16.5 pt: page and state titles */
     g_font_deco  = CreateFontW(-MulDiv(165, g_dpi, 720), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
@@ -44,8 +45,9 @@ void fonts_destroy(void)
     if (g_font_small_bold) DeleteObject(g_font_small_bold);
     if (g_font_title) DeleteObject(g_font_title);
     if (g_font_deco)  DeleteObject(g_font_deco);
+    if (g_font_meta)  DeleteObject(g_font_meta);
     g_font = g_font_big = g_font_small = g_font_mono = NULL;
-    g_font_bold = g_font_small_bold = g_font_title = g_font_deco = NULL;
+    g_font_bold = g_font_small_bold = g_font_title = g_font_deco = g_font_meta = NULL;
 }
 
 void brushes_create(void)
@@ -263,6 +265,10 @@ void draw_button(const DRAWITEMSTRUCT *d)
     if (((ud >> 8) & 0xFFFFFF) == 2) backdrop = CLR_ACCENT;    /* inside the state block */
     if (((ud >> 8) & 0xFFFFFF) == 3) backdrop = CLR_FOOTER;
     if (((ud >> 8) & 0xFFFFFF) == 4) backdrop = CLR_TINT;
+
+    /* The VPN button lies on the state card, not on the page: accent while
+       on, the card's surface otherwise (off, connecting, error). */
+    if (d->hwndItem == g_toggle) backdrop = g_vpn_on ? CLR_ACCENT : CLR_SURFACE;
 
     if (kind == BK_NAV) { draw_nav(d); return; }
     if (kind == BK_SELECT) {

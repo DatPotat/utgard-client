@@ -68,7 +68,7 @@ Wintun 0.14.1 (wintun.dll)
 
 --------------------------------------------------------------------------------
 Lucide icons (https://lucide.dev, github.com/lucide-icons/lucide)
-Used: the outlines of 16 icons, stored as SVG path data in
+Used: the outlines of 17 icons, stored as SVG path data in
 src/ui/icons_lucide.h. The license below is reproduced from the project's
 LICENSE file as fetched on 2026-09-28.
 --------------------------------------------------------------------------------

@@ -1075,12 +1075,29 @@ void act_profile_delete(HWND hwnd)
     layout(hwnd);
 }
 
+/* One click: with the VPN off the server becomes the chosen one at once;
+   with it on only the row is marked - a running tunnel is switched by the
+   double click, never by a stray single one. */
+void act_profile_pick(HWND hwnd)
+{
+    int i = profile_selected();
+    if (!g_vpn_on && !g_busy && !g_sub_busy && i >= 0 && i != g_prof.active) {
+        g_prof.active = i;
+        if (!profiles_save(&g_prof))
+            problem(hwnd, L"Сервер выбран, но сохранить выбор не удалось");
+        InvalidateRect(g_plist, NULL, TRUE);
+    }
+    layout(hwnd);
+}
+
+/* Double click: switch to the server - the running tunnel moves to it, or,
+   with the VPN off, it is chosen and the VPN switched on. */
 void act_profile_activate(HWND hwnd)
 {
     int i = profile_selected();
 
     /* The subscription is being fetched: its result may renumber the list. */
-    if (i < 0 || i == g_prof.active || g_busy || g_sub_busy) {
+    if (i < 0 || g_busy || g_sub_busy || (g_vpn_on && i == g_prof.active)) {
         SendMessageW(g_plist, LB_SETCURSEL, (WPARAM)g_prof.active, 0);
         return;
     }
@@ -1088,6 +1105,9 @@ void act_profile_activate(HWND hwnd)
         g_prof.active = i;
         if (!profiles_save(&g_prof))
             problem(hwnd, L"Сервер выбран, но сохранить выбор не удалось");
+        InvalidateRect(g_plist, NULL, TRUE);
+        act_vpn(hwnd);
+        return;
     } else {
         /* The running tunnel keeps its profile until the new one runs
            (done_vpn). A download of the AmneziaWG core, if that is what

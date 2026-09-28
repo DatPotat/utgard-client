@@ -273,8 +273,8 @@ LRESULT pac_row_draw(NMLVCUSTOMDRAW *cd)
     text_at(cd->nmcd.hdc, r.left + S(16), r.top, xt - S(32), r.bottom - r.top, src,
             CLR_TEXT, g_font, DT_LEFT | DT_PATH_ELLIPSIS);
     text_at(cd->nmcd.hdc, r.left + xt, r.top, xs - xt - S(16), r.bottom - r.top, type,
-            CLR_MUTED, g_font_small, DT_LEFT);
+            CLR_MUTED, g_font_meta, DT_LEFT);
     text_at(cd->nmcd.hdc, r.left + xs, r.top, S(180), r.bottom - r.top, state,
-            CLR_MUTED, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
+            CLR_MUTED, g_font_meta, DT_LEFT | DT_END_ELLIPSIS);
     return CDRF_SKIPDEFAULT;
 }
