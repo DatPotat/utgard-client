@@ -1,6 +1,16 @@
 #include "genconf.h"
+#include "defconfig.h"
 #include <stdio.h>
 #include <string.h>
+
+static int write_base(void)
+{
+    FILE *f = fopen("build/config.default.json", "wb");
+    if (!f) return 0;
+    fwrite(utgard_default_config, 1, utgard_default_config_len, f);
+    fclose(f);
+    return 1;
+}
 
 int main(void)
 {
@@ -18,7 +28,8 @@ int main(void)
     store.items[0].link.port = 443;
     strcpy(store.items[0].link.method, "aes-128-gcm");
     strcpy(store.items[0].link.password, "test-only-password");
-    input.base_path = "sing-box/config.default.json";
+    if (!write_base()) return 5;
+    input.base_path = "build/config.default.json";
     input.rule_set_path = "build/general.srs";
     input.store = &store;
     input.pac_port = 32101;
@@ -27,7 +38,7 @@ int main(void)
     input.pac_dns_sys_port = 32105;
     input.vpn_proxy_port = 32103;
     input.proxy_password = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    input.client_exe = "D:/Personal/utgard-client/bin/x64/utgard.exe";
+    input.client_exe = "bin/utgard-pac-helper.exe";   /* placeholder: only printed into the JSON */
     if (!genconf_build(&input, &text, error, sizeof error)) {
         fprintf(stderr, "%s\n", error);
         return 1;

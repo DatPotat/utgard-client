@@ -26,7 +26,8 @@ int main(int argc,char **argv)
 {
     genconf_input in={0};wchar_t err[256];const char script[]="function FindProxyForURL(u,h){return h=='vpn.example'?'PROXY ignored:9':'DIRECT';}";
     pac_script *pac;dns_server vpn={39211,11,0},sys={39212,22,0};HANDLE threads[2];FILE *f;STARTUPINFOA si={0};PROCESS_INFORMATION pi={0};char cmd[2048];WSADATA wsa;int ok;
-    if(argc!=2||WSAStartup(MAKEWORD(2,2),&wsa))return 2;if(!pacbridge_prepare(&in,1,0,err,256))return 3;
+    if(argc!=2||WSAStartup(MAKEWORD(2,2),&wsa))return 2;
+    if(!pacbridge_prepare(&in,1,0,err,256))return 3;
     pac=pac_open(script,sizeof script-1,err,256);if(!pac)return 4;pacbridge_activate(&pac,1);
     threads[0]=CreateThread(NULL,0,serve,&vpn,0,NULL);threads[1]=CreateThread(NULL,0,serve,&sys,0,NULL);Sleep(100);
     f=fopen("pac-dns-route.json","wb");if(!f)return 5;

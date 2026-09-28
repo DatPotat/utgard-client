@@ -1,2 +1,6 @@
 #include <windows.h>
 1 RT_MANIFEST "pac-helper.manifest"
+
+#define UTGARD_FILE_DESC "Utgard PAC helper"
+#define UTGARD_FILE_NAME "utgard-pac-helper.exe"
+#include "versioninfo.rc"

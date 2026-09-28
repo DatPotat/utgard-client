@@ -20,7 +20,9 @@ int main(int argc,char **argv)
     if(bind(l,(struct sockaddr *)&a,sizeof a)||listen(l,1))return 3;
     c=accept(l,NULL,NULL);if(c==INVALID_SOCKET)return 4;
     puts("accepted");fflush(stdout);
-    if(!io(c,b,2,0)||b[0]!=5||!io(c,b,b[1],0))return 5;b[0]=5;b[1]=0;if(!io(c,b,2,1))return 5;
+    if(!io(c,b,2,0)||b[0]!=5||!io(c,b,b[1],0))return 5;
+    b[0]=5;b[1]=0;
+    if(!io(c,b,2,1))return 5;
     if(!io(c,b,3,0)||b[0]!=5||!address(c,&atyp))return 6;
     printf("request command=%u ATYP=%u\n",(unsigned)b[1],(unsigned)atyp);fflush(stdout);
     command=b[1];if(command==3){
@@ -30,5 +32,8 @@ int main(int argc,char **argv)
         n=recv(u,(char *)b,sizeof b,0);if(n<4)return 8;atyp=b[3];
     } else { unsigned char reply[10]={5,0,0,1,127,0,0,1,0,0};if(!io(c,reply,10,1))return 9;recv(c,(char *)b,sizeof b,0); }
     printf("SOCKS command=%u ATYP=%u\n",(unsigned)command,(unsigned)atyp);fflush(stdout);
-    if(u!=INVALID_SOCKET)closesocket(u);closesocket(c);closesocket(l);return 0;
+    if(u!=INVALID_SOCKET)closesocket(u);
+    closesocket(c);
+    closesocket(l);
+    return 0;
 }

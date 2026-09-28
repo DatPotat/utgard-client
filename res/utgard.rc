@@ -7,3 +7,7 @@
 1 ICON "utgard.ico"
 2 ICON "utgard-tray-off.ico"
 3 ICON "utgard-tray-on.ico"
+
+#define UTGARD_FILE_DESC "Utgard VPN client"
+#define UTGARD_FILE_NAME "utgard.exe"
+#include "versioninfo.rc"

@@ -35,7 +35,6 @@ static void sha_final(sha256_ctx *c, unsigned char out[32])
     for(i=0;i<8;i++){out[i*4]=(unsigned char)(c->h[i]>>24);out[i*4+1]=(unsigned char)(c->h[i]>>16);out[i*4+2]=(unsigned char)(c->h[i]>>8);out[i*4+3]=(unsigned char)c->h[i];}memset(c,0,sizeof *c);
 }
 static void hash(const char *script,size_t n,unsigned char out[32]){sha256_ctx c;sha_init(&c);sha_update(&c,script,n);sha_final(&c,out);}
-int pacblob_store_version_supported(int version) { return version >= 1 && version <= 3; }
 
 size_t pacblob_pack(const char *script, size_t n, const uint16_t *source, size_t units, unsigned char *out, size_t cap)
 {

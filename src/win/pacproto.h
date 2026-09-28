@@ -4,10 +4,12 @@
 #include <windows.h>
 
 #define PACPROC_MAGIC 0x50414332u
+/* A new set of scripts for a running helper: pacproc_init with this magic,
+   then the scripts exactly as at start. */
+#define PACPROC_RELOAD_MAGIC 0x50414352u
 
 typedef struct {
     DWORD magic;
-    UINT_PTR status_handle;
     DWORD script_count;
 } pacproc_init;
 
@@ -28,6 +30,7 @@ typedef struct {
     DWORD magic;
     UINT_PTR process_handle;
     UINT_PTR job_handle;
+    UINT_PTR status_handle;
 } pacproc_command;
 
 #endif

@@ -1,0 +1,33 @@
+/* Shared VERSIONINFO. The including .rc defines UTGARD_FILE_DESC and
+   UTGARD_FILE_NAME; version-info.h is written by build.sh from
+   src/version.h, the only place the version lives. */
+#include "version-info.h"
+
+1 VERSIONINFO
+FILEVERSION     UTGARD_VER_NUM
+PRODUCTVERSION  UTGARD_VER_NUM
+FILEFLAGSMASK   0x3fL
+FILEFLAGS       0x0L
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "DatPotat"
+            VALUE "FileDescription",  UTGARD_FILE_DESC
+            VALUE "FileVersion",      UTGARD_VER_STR
+            VALUE "InternalName",     UTGARD_FILE_NAME
+            VALUE "LegalCopyright",   "Copyright (c) 2026 DatPotat, MIT License"
+            VALUE "OriginalFilename", UTGARD_FILE_NAME
+            VALUE "ProductName",      "Utgard"
+            VALUE "ProductVersion",   UTGARD_VER_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

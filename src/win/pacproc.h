@@ -24,8 +24,10 @@ int pacproc_attach(pac_process *p, HANDLE singbox,
                    wchar_t *err, size_t cap);
 void pacproc_cancel(pac_process *p);
 
-/* Proxy used only for an explicit "download PAC through VPN" action. */
-int pacproc_proxy(unsigned short *port, char password[65]);
-void pacproc_proxy_clear(void);
+/* The VPN went off: forget the serving helper's reload pipe. */
+void pacproc_vpn_off(void);
+/* Hand the serving helper the enabled scripts of store without a reconnect.
+   0 when there is no serving helper or the hand-over failed: reconnect. */
+int pacproc_reload(const pac_store *store);
 
 #endif

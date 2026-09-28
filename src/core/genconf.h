@@ -26,6 +26,8 @@ typedef struct {
     const char  *log_level;      /* log level override; NULL keeps it */
     const char  *stack;          /* tun stack override; NULL keeps it */
     const char  *dns_host;       /* host of the "doh" DNS server; NULL keeps it */
+    const char  *dns_type;       /* its type, "h3" or "https"; NULL keeps it */
+    const char  *dns_path;       /* its path; NULL keeps it */
     const profile_store *store;
 
     /* The AmneziaWG tunnel, when the active profile needs it and it is up.

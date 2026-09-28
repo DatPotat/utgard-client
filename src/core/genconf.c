@@ -1057,16 +1057,20 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
                 json_object_set_string(o, "stack", in->stack);
         }
     }
-    /* Only the server tagged "doh" is redirected: its host is what the
-       setting chooses; path, port and the resolver used to find it stay. */
+    /* Only the server tagged "doh" is redirected: host, type (HTTP/3 or
+       HTTP/2) and path are what the setting chooses; port and the resolver
+       used to find the host stay. */
     if (in->dns_host && in->dns_host[0] && dns) {
         JSON_Array *servers = json_object_get_array(dns, "servers");
         size_t      k, cnt = servers ? json_array_get_count(servers) : 0;
         for (k = 0; k < cnt; k++) {
             JSON_Object *o = json_array_get_object(servers, k);
             const char  *tag = o ? json_object_get_string(o, "tag") : NULL;
-            if (tag && strcmp(tag, "doh") == 0)
+            if (tag && strcmp(tag, "doh") == 0) {
                 json_object_set_string(o, "server", in->dns_host);
+                if (in->dns_type && in->dns_type[0]) json_object_set_string(o, "type", in->dns_type);
+                if (in->dns_path && in->dns_path[0]) json_object_set_string(o, "path", in->dns_path);
+            }
         }
     }
     if (in->log_level && in->log_level[0]) {

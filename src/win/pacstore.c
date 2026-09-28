@@ -4,7 +4,6 @@
 #include "parson.h"
 #include <strsafe.h>
 #include <wincrypt.h>
-#include <bcrypt.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -14,15 +13,6 @@ static int save_blocked, notice_pending;
 static wchar_t unreadable_path[2048];
 static SRWLOCK notice_lock = SRWLOCK_INIT;
 _Static_assert(sizeof(wchar_t) == sizeof(uint16_t), "Windows UTF-16 required");
-
-static int script_hash(const char *text, size_t length, char hex[65])
-{
-    BYTE hash[32]; DWORD size = sizeof hash; int i;
-    if (length > MAXDWORD || !CryptHashCertificate2(BCRYPT_SHA256_ALGORITHM, 0, NULL,
-        (const BYTE *)text, (DWORD)length, hash, &size) || size != sizeof hash) return 0;
-    for (i = 0; i < 32; i++) StringCchPrintfA(hex + 2 * i, 3, "%02x", hash[i]);
-    SecureZeroMemory(hash, sizeof hash); return 1;
-}
 
 static int protect_blob(const BYTE *plain, DWORD plain_size, char out[16384])
 {
@@ -56,36 +46,24 @@ static int store_path(wchar_t path[1024])
     return SUCCEEDED(StringCchCopyW(slash + 1, 1024 - (slash + 1 - path), L"pac.json"));
 }
 
-static int load_item(JSON_Object *o, pac_item *item, int version)
+/* Only format 3 exists: the source and the SHA-256 of the stored script
+   sit together inside one DPAPI blob. Anything else is unreadable. */
+static int load_item(JSON_Object *o, pac_item *item)
 {
-    const char *source = o ? json_object_get_string(o, "source") : NULL;
     const char *protected_source = o ? json_object_get_string(o, "source_protected") : NULL;
     const char *script = o ? json_object_get_string(o, "script") : NULL;
-    const char *saved_hash = o ? json_object_get_string(o, "sha256") : NULL;
-    char hash[65]; size_t length;
-    if (!script || !json_object_has_value_of_type(o, "enabled", JSONBoolean)) return 0;
-    length = strlen(script); if (!length || length > PAC_MAX) return 0;
-    if (version >= 3) {
-        BYTE *plain; DWORD plain_size; size_t units = 0;
-        if (!protected_source || !unprotect_blob(protected_source, &plain, &plain_size)) return 0;
-        if (!pacblob_unpack(plain, plain_size, script, length, (uint16_t *)item->source, 2048, &units)) {
-            SecureZeroMemory(plain, plain_size); LocalFree(plain); return 0;
-        }
-        SecureZeroMemory(plain, plain_size); LocalFree(plain);
-    } else if (version >= 2) {
-        BYTE *plain; DWORD plain_size;
-        if (!protected_source || !saved_hash || !script_hash(script, length, hash) || _stricmp(saved_hash, hash) ||
-            !unprotect_blob(protected_source, &plain, &plain_size)) return 0;
-        if (plain_size < sizeof(wchar_t) || plain_size > sizeof item->source || plain_size % sizeof(wchar_t) ||
-            ((wchar_t *)plain)[plain_size / sizeof(wchar_t) - 1]) {
-            SecureZeroMemory(plain, plain_size); LocalFree(plain); return 0;
-        }
-        memcpy(item->source, plain, plain_size); SecureZeroMemory(plain, plain_size); LocalFree(plain);
-    } else if (!source || !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, source, -1, item->source, 2048)) return 0;
-    else SecureZeroMemory((void *)source, strlen(source));
-    item->text = (char *)malloc(length + 1); if (!item->text) return 0; memcpy(item->text, script, length + 1);
+    BYTE *plain; DWORD plain_size; size_t length, units = 0; int ok;
+    if (!script || !protected_source || !json_object_has_value_of_type(o, "enabled", JSONBoolean)) return 0;
+    length = strlen(script);
+    if (!length || length > PAC_MAX || !unprotect_blob(protected_source, &plain, &plain_size)) return 0;
+    ok = pacblob_unpack(plain, plain_size, script, length, (uint16_t *)item->source, 2048, &units);
+    SecureZeroMemory(plain, plain_size);
+    LocalFree(plain);
+    if (!ok) return 0;
+    item->text = (char *)malloc(length + 1);
+    if (!item->text) return 0;
+    memcpy(item->text, script, length + 1);
     item->enabled = json_object_get_boolean(o, "enabled") == 1;
-    item->via_vpn = json_object_has_value_of_type(o, "via_vpn", JSONBoolean) && json_object_get_boolean(o, "via_vpn") == 1;
     return 1;
 }
 
@@ -114,10 +92,9 @@ int pacstore_load(pac_store *s)
     v = json_parse_string(buffer); SecureZeroMemory(buffer, PAC_STORE_MAX + 1u); free(buffer);
     root = json_value_get_object(v); if (!root) goto unreadable;
     version = (int)json_object_get_number(root, "version"); items = json_object_get_array(root, "items");
-    if (!items) { s->count = 1; ok = load_item(root, &s->items[0], 0); goto done; }
-    if (!pacblob_store_version_supported(version)) goto unreadable;
+    if (version != 3 || !items) goto unreadable;
     count = json_array_get_count(items); if (count > PAC_ITEMS_MAX) goto unreadable;
-    for (i = 0; i < count; i++) if (!load_item(json_array_get_object(items, i), &s->items[i], version)) goto unreadable;
+    for (i = 0; i < count; i++) if (!load_item(json_array_get_object(items, i), &s->items[i])) goto unreadable;
     s->count = (int)count; ok = 1; goto done;
 unreadable:
     pacstore_free(s); set_aside(path); ok = 1;
@@ -141,7 +118,6 @@ int pacstore_save(const pac_store *s)
         SecureZeroMemory(plain, sizeof plain); value = json_value_init_object(); if (!value) goto done; item = json_value_get_object(value);
         json_object_set_string(item, "source_protected", encoded); SecureZeroMemory(encoded, sizeof encoded);
         json_object_set_string(item, "script", s->items[i].text); json_object_set_boolean(item, "enabled", s->items[i].enabled);
-        json_object_set_boolean(item, "via_vpn", s->items[i].via_vpn);
         if (json_array_append_value(json_value_get_array(list), value) != JSONSuccess) { json_value_free(value); goto done; }
     }
     json_object_set_number(json_value_get_object(root), "version", 3); json_object_set_value(json_value_get_object(root), "items", list); list = NULL;

@@ -46,8 +46,7 @@ static int fail_code(wchar_t *err, size_t cap, const wchar_t *text, DWORD code)
 
 static int fetch(const wchar_t *url, char **body, size_t *len,
                  wchar_t *err, size_t errcap, int pac,
-                 wchar_t *redirect, DWORD redirect_bytes,
-                 unsigned short proxy_port, const char *proxy_password)
+                 wchar_t *redirect, DWORD redirect_bytes)
 {
     URL_COMPONENTS  uc;
     wchar_t         host[256];
@@ -86,17 +85,10 @@ static int fetch(const wchar_t *url, char **body, size_t *len,
     if (FAILED(StringCchPrintfW(target, 4096, L"%s%s", path, extra)))
         return fail(err, errcap, L"Слишком длинный путь в URL");
 
-    if (proxy_port) {
-        wchar_t proxy[80];
-        StringCchPrintfW(proxy, 80, L"http://127.0.0.1:%u", proxy_port);
-        session = WinHttpOpen(L"utgard/1.0", WINHTTP_ACCESS_TYPE_NAMED_PROXY,
-                              proxy, WINHTTP_NO_PROXY_BYPASS, 0);
-    } else {
-        session = WinHttpOpen(L"utgard/1.0",
-                              pac ? WINHTTP_ACCESS_TYPE_NO_PROXY
-                                  : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-                              WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    }
+    session = WinHttpOpen(L"utgard/1.0",
+                          pac ? WINHTTP_ACCESS_TYPE_NO_PROXY
+                              : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) return fail_code(err, errcap, L"Не удалось открыть сетевую сессию",
                                    GetLastError());
 
@@ -114,21 +106,6 @@ static int fetch(const wchar_t *url, char **body, size_t *len,
                                  ? WINHTTP_FLAG_SECURE : 0);
     if (!req) { fail_code(err, errcap, L"Не удалось создать запрос", GetLastError());
                 goto done; }
-    if (proxy_port) {
-        wchar_t password[65];
-        if (!proxy_password ||
-            !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, proxy_password,
-                                 -1, password, 65) ||
-            !WinHttpSetOption(req, WINHTTP_OPTION_PROXY_USERNAME,
-                              (LPVOID)L"utgard", 7 * sizeof(wchar_t)) ||
-            !WinHttpSetOption(req, WINHTTP_OPTION_PROXY_PASSWORD,
-                              password, (DWORD)((wcslen(password) + 1) * sizeof(wchar_t)))) {
-            SecureZeroMemory(password, sizeof password);
-            fail(err, errcap, L"Не удалось настроить доступ к VPN для загрузки PAC");
-            goto done;
-        }
-        SecureZeroMemory(password, sizeof password);
-    }
     if (pac) {
         DWORD disable = WINHTTP_DISABLE_REDIRECTS;
         if (!WinHttpSetOption(req, WINHTTP_OPTION_DISABLE_FEATURE, &disable, sizeof disable)) {
@@ -212,7 +189,7 @@ done:
 }
 
 int net_fetch(const wchar_t *url, char **body, size_t *len, wchar_t *err, size_t cap)
-{ return fetch(url, body, len, err, cap, 0, NULL, 0, 0, NULL); }
+{ return fetch(url, body, len, err, cap, 0, NULL, 0); }
 
 static int pac_url_secure(const wchar_t *url)
 {
@@ -228,8 +205,7 @@ static int pac_url_secure(const wchar_t *url)
             (!_wcsicmp(host, L"127.0.0.1") || !_wcsicmp(host, L"localhost")));
 }
 
-int net_fetch_pac(const wchar_t *url, unsigned short proxy_port,
-                  const char *proxy_password, char **body, size_t *len,
+int net_fetch_pac(const wchar_t *url, char **body, size_t *len,
                   wchar_t *err, size_t cap)
 {
     wchar_t current[4096], location[4096], next[4096];
@@ -241,8 +217,7 @@ int net_fetch_pac(const wchar_t *url, unsigned short proxy_port,
         return fail(err, cap, L"PAC по URL принимается только по HTTPS");
     for (i = 0; i < 6; i++) {
         DWORD count = 4096;
-        int result = fetch(current, body, len, err, cap, 1, location,
-                           sizeof location, proxy_port, proxy_password);
+        int result = fetch(current, body, len, err, cap, 1, location, sizeof location);
         if (result != 2) return result;
         if (FAILED(UrlCombineW(current, location, next, &count, 0)) ||
             FAILED(StringCchCopyW(current, 4096, next))) return fail(err, cap, L"Некорректное перенаправление PAC");

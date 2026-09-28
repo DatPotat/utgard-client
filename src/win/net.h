@@ -15,8 +15,7 @@ int net_fetch(const wchar_t *url, char **body, size_t *len,
               wchar_t *err, size_t errcap);
 /* PAC supports HTTP(S). A non-zero proxy_port sends the request through the
    authenticated loopback mixed inbound owned by the active VPN profile. */
-int net_fetch_pac(const wchar_t *url, unsigned short proxy_port,
-                  const char *proxy_password, char **body, size_t *len,
+int net_fetch_pac(const wchar_t *url, char **body, size_t *len,
                   wchar_t *err, size_t errcap);
 
 /* Round-trip time to a server in milliseconds, or -1 when it does not answer.

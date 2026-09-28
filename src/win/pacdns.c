@@ -12,13 +12,16 @@
 static SRWLOCK cache_lock = SRWLOCK_INIT;
 static struct { unsigned char ip[16]; int family; char name[256]; ULONGLONG until, serial; } cache[2048];
 static ULONGLONG serial;
-static volatile LONG cache_generation;
+/* Concurrent DNS jobs. Each job marks at most one name as being evaluated,
+   so a guard table of the same size can never fill up: a refusal from the
+   guard always means a re-entrant query from the PAC's own dnsResolve(). */
+#define DNS_JOBS_MAX 512
 static volatile LONG jobs;
 static unsigned short route_vpn_port, route_sys_port;
 static int local_port;
-static HANDLE interface_notify, route_notify;
+static HANDLE interface_notify;
 static SRWLOCK evaluating_lock = SRWLOCK_INIT;
-static char evaluating[64][256];
+static char evaluating[DNS_JOBS_MAX][256];
 
 static unsigned get16(const unsigned char *p) { return ((unsigned)p[0] << 8) | p[1]; }
 
@@ -47,7 +50,7 @@ static int dns_name(const unsigned char *p, size_t size, size_t *at, char name[2
     return 0;
 }
 
-static void remember(const unsigned char *packet, int length, LONG expected_generation)
+static void remember(const unsigned char *packet, int length)
 {
     size_t at = 12; char name[256], owner[256]; unsigned i, answers;
     if (length < 12 || get16(packet + 4) != 1 || !(packet[2] & 0x80) || (packet[3] & 15) ||
@@ -63,10 +66,6 @@ static void remember(const unsigned char *packet, int length, LONG expected_gene
         at += 10; if (at + bytes > (size_t)length) return;
         if ((type == 1 && bytes == 4) || (type == 28 && bytes == 16)) {
             AcquireSRWLockExclusive(&cache_lock);
-            if (InterlockedCompareExchange(&cache_generation, 0, 0) != expected_generation) {
-                ReleaseSRWLockExclusive(&cache_lock);
-                return;
-            }
             for (k = 0; k < 2048; k++) {
                 if ((cache[k].family == (int)bytes && !memcmp(cache[k].ip, packet + at, bytes) &&
                      !_stricmp(cache[k].name, name)) || !cache[k].family) { slot = k; break; }
@@ -92,29 +91,29 @@ int pacdns_names(const unsigned char *ip, int ipv6, char names[][256], int max_n
     ReleaseSRWLockShared(&cache_lock); return found;
 }
 
-void pacdns_flush(void)
-{
-    AcquireSRWLockExclusive(&cache_lock); InterlockedIncrement(&cache_generation);
-    SecureZeroMemory(cache, sizeof cache); serial = 0;
-    ReleaseSRWLockExclusive(&cache_lock); pacbridge_flush_decisions();
-}
-
+/* The IP -> name map is not flushed on a network change: a DNS answer stays
+   true for its TTL on any network, and sing-box hands the relay only the IP,
+   so the map is the only source of the name. Only PAC decisions depend on
+   the network (myIpAddress, isInNet on a resolved address): they are
+   dropped when an interface appears or disappears, not on every parameter
+   change. */
 static VOID CALLBACK network_changed(PVOID context, PMIB_IPINTERFACE_ROW row, MIB_NOTIFICATION_TYPE type)
-{ (void)context; (void)row; (void)type; pacdns_flush(); }
-static VOID CALLBACK route_changed(PVOID context, PMIB_IPFORWARD_ROW2 row, MIB_NOTIFICATION_TYPE type)
-{ (void)context; (void)row; (void)type; pacdns_flush(); }
+{
+    (void)context; (void)row;
+    if (type == MibAddInstance || type == MibDeleteInstance) pacbridge_flush_decisions();
+}
 
 static int evaluation_enter(const char *name)
 {
     int ok;
     AcquireSRWLockExclusive(&evaluating_lock);
-    ok = pacguard_enter(evaluating, 64, name);
+    ok = pacguard_enter(evaluating, DNS_JOBS_MAX, name);
     ReleaseSRWLockExclusive(&evaluating_lock); return ok;
 }
 static void evaluation_leave(const char *name)
 {
     AcquireSRWLockExclusive(&evaluating_lock);
-    pacguard_leave(evaluating, 64, name);
+    pacguard_leave(evaluating, DNS_JOBS_MAX, name);
     ReleaseSRWLockExclusive(&evaluating_lock);
 }
 
@@ -132,11 +131,9 @@ static DWORD WINAPI answer(void *arg)
     dns_job *j = (dns_job *)arg; SOCKET upstream = INVALID_SOCKET;
     unsigned char prefix[2], id[2]; int length = j->length, target_vpn = 0, entered = 0;
     char name[256] = {0}; size_t at = 12; unsigned qtype = 0; struct sockaddr_in target;
-    LONG response_generation;
     if (j->tcp) { timeouts(j->client); if (!io(j->client, prefix, 2, 0)) goto done; length = get16(prefix); if (length < 12 || !io(j->client, j->packet, length, 0)) goto done; }
     if (length < 12 || j->packet[2] & 0x80) goto done;
     memcpy(id, j->packet, 2);
-    response_generation = InterlockedCompareExchange(&cache_generation, 0, 0);
     if (get16(j->packet + 4) == 1 && dns_name(j->packet, length, &at, name) && at + 4 <= (size_t)length) {
         qtype = get16(j->packet + at);
         if (qtype == 1 || qtype == 28 || qtype == 65) {
@@ -155,12 +152,13 @@ static DWORD WINAPI answer(void *arg)
     if (j->tcp) { if (!io(upstream, prefix, 2, 0)) goto done; length = get16(prefix); if (length < 12 || !io(upstream, j->packet, length, 0)) goto done; }
     else length = recv(upstream, (char *)j->packet, sizeof j->packet, 0);
     if (length < 12 || memcmp(id, j->packet, 2)) goto done;
-    remember(j->packet, length, response_generation);
+    remember(j->packet, length);
     if (j->tcp) { if (io(j->client, prefix, 2, 1)) io(j->client, j->packet, length, 1); }
     else sendto(j->client, (char *)j->packet, length, 0, (struct sockaddr *)&j->peer, sizeof j->peer);
 done:
     if (entered) evaluation_leave(name);
-    if (upstream != INVALID_SOCKET) closesocket(upstream); if (j->tcp) closesocket(j->client);
+    if (upstream != INVALID_SOCKET) closesocket(upstream);
+    if (j->tcp) closesocket(j->client);
     free(j); InterlockedDecrement(&jobs); return 0;
 }
 
@@ -175,7 +173,7 @@ static DWORD WINAPI accept_dns(void *arg)
         if (l.tcp) j->client = accept(l.socket, NULL, NULL);
         else { j->client = l.socket; size = sizeof j->peer; j->length = recvfrom(l.socket, (char *)j->packet, sizeof j->packet, 0, (struct sockaddr *)&j->peer, &size); if (j->length < 12) { free(j); continue; } }
         if (j->client == INVALID_SOCKET) { free(j); break; }
-        if (InterlockedIncrement(&jobs) > 512) { pacstatus_dns_cap(); InterlockedDecrement(&jobs); if (j->tcp) closesocket(j->client); free(j); continue; }
+        if (InterlockedIncrement(&jobs) > DNS_JOBS_MAX) { pacstatus_dns_cap(); InterlockedDecrement(&jobs); if (j->tcp) closesocket(j->client); free(j); continue; }
         thread = CreateThread(NULL, 0, answer, j, 0, NULL);
         if (thread) CloseHandle(thread); else { InterlockedDecrement(&jobs); if (j->tcp) closesocket(j->client); free(j); }
     }
@@ -205,19 +203,17 @@ int pacdns_start(int *port, unsigned short vpn_port, unsigned short sys_port, wc
     {
         NETIO_STATUS interface_status = NotifyIpInterfaceChange(
             AF_UNSPEC, network_changed, NULL, FALSE, &interface_notify);
-        NETIO_STATUS route_status = interface_status == NO_ERROR ? NotifyRouteChange2(
-            AF_UNSPEC, route_changed, NULL, FALSE, &route_notify) : interface_status;
-        if (interface_status != NO_ERROR || route_status != NO_ERROR) {
-            if (interface_notify) { CancelMibChangeNotify2(interface_notify); interface_notify = NULL; }
+        if (interface_status != NO_ERROR) {
             if (err && cap) StringCchPrintfW(err, cap,
-                L"Не удалось следить за сменой сети для PAC (интерфейс %lu, маршруты %lu)",
-                (unsigned long)interface_status, (unsigned long)route_status);
+                L"Не удалось следить за сменой сети для PAC (ошибка %lu)",
+                (unsigned long)interface_status);
             return 0;
         }
     }
     return 1;
 fail:
-    if (tcp != INVALID_SOCKET) closesocket(tcp); if (udp != INVALID_SOCKET) closesocket(udp);
+    if (tcp != INVALID_SOCKET) closesocket(tcp);
+    if (udp != INVALID_SOCKET) closesocket(udp);
     if (err && cap) StringCchCopyW(err, cap, L"Не удалось запустить локальный DNS-маршрутизатор PAC");
     return 0;
 }
