@@ -15,8 +15,9 @@ static void publish(void)
     status.sequence_end = status.sequence_begin;
     zero.QuadPart = 0;
     SetFilePointerEx(status_file, zero, NULL, FILE_BEGIN);
+    /* No flush: a reader in another process sees the cached write, and a
+       disk flush here would serialize relay threads on every event. */
     WriteFile(status_file, &status, sizeof status, &written, NULL);
-    FlushFileBuffers(status_file);
 }
 
 void pacstatus_writer(HANDLE file, unsigned active_count)
@@ -27,7 +28,14 @@ void pacstatus_writer(HANDLE file, unsigned active_count)
     status.magic = PAC_STATUS_MAGIC;
     status.version = PAC_STATUS_VERSION;
     status.active_count = active_count;
-    status.helper_pid = GetCurrentProcessId();
+    publish();
+    ReleaseSRWLockExclusive(&status_lock);
+}
+
+void pacstatus_active(unsigned active_count)
+{
+    AcquireSRWLockExclusive(&status_lock);
+    status.active_count = active_count;
     publish();
     ReleaseSRWLockExclusive(&status_lock);
 }
@@ -81,16 +89,4 @@ int pacstatus_read(pac_status_record *record)
         CloseHandle(file); return 0;
     }
     CloseHandle(file); *record = b; return 1;
-}
-
-int pacstatus_live(const pac_status_record *record)
-{
-    HANDLE process;
-    int live;
-    if (!record || !record->helper_pid) return 0;
-    process = OpenProcess(SYNCHRONIZE, FALSE, record->helper_pid);
-    if (!process) return 0;
-    live = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
-    CloseHandle(process);
-    return live;
 }

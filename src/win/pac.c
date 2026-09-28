@@ -1,5 +1,6 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include "pacloop.h"
 #include "pac.h"
 #include <winhttp.h>
 #include <bcrypt.h>
@@ -44,7 +45,12 @@ static DWORD WINAPI serve(void *arg)
         ULONGLONG deadline;
         FD_ZERO(&f);
         FD_SET(p->listener, &f);
-        if (select(0, &f, NULL, NULL, &tv) <= 0) continue;
+        {
+            pacloop_state ready = pacloop_select(select(0, &f, NULL, NULL, &tv));
+            /* The script must stay served: pause until the next try or stop. */
+            if (ready == PACLOOP_ERROR) { WaitForSingleObject(p->stop, 200); continue; }
+            if (ready == PACLOOP_IDLE) continue;
+        }
         s = accept(p->listener, NULL, NULL);
         if (s == INVALID_SOCKET) continue;
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof timeout);

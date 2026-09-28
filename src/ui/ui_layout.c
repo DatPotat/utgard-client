@@ -5,19 +5,44 @@
 #include "coremanifest.h"
 #include "ui.h"
 
-void layout(HWND hwnd)
+/* Width of a button's caption in g_font, the font buttons are drawn with. */
+static int caption_w(HWND b)
 {
-    HWND c_hwnd = hwnd;
-    RECT c;
-    GetClientRect(hwnd, &c);
+    wchar_t text[64];
+    SIZE    size = { 0, 0 };
+    int     n = GetWindowTextW(b, text, 64);
+    HDC     dc = GetDC(b);
+    HGDIOBJ old;
+    if (!dc) return S(100);
+    old = SelectObject(dc, g_font);
+    GetTextExtentPoint32W(dc, text, n, &size);
+    SelectObject(dc, old);
+    ReleaseDC(b, dc);
+    return size.cx;
+}
 
-    MoveWindow(g_tab_utgard, S(14),  S(6), S(96), S(28), TRUE);
-    MoveWindow(g_tab_zapret, S(112), S(6), S(96), S(28), TRUE);
-    MoveWindow(g_set_open, c.right - PAD - S(110), S(6), S(110), S(28), TRUE);
-    MoveWindow(g_ping_now, c.right - PAD - S(110) - S(8) - S(140), S(6), S(140), S(28), TRUE);
-    ShowWindow(g_ping_now, g_page == PAGE_UTGARD ? SW_SHOW : SW_HIDE);
-    EnableWindow(g_ping_now, !g_ping_busy && g_prof.count > 0);
+/* Buttons left to right from PAD with the same gap between every two. Each
+   is its caption plus the same padding; the padding shrinks (down to S(8))
+   when the row would not fit in avail, and never exceeds S(28). */
+static void button_row(const HWND *buttons, int count, int y, int avail)
+{
+    int i, x = PAD, text = 0, pad, widths[8];
+    if (count > 8) count = 8;
+    for (i = 0; i < count; i++) text += widths[i] = caption_w(buttons[i]);
+    pad = (avail - S(8) * (count - 1) - text) / count;
+    if (pad > S(28)) pad = S(28);
+    if (pad < S(8))  pad = S(8);
+    for (i = 0; i < count; i++) {
+        MoveWindow(buttons[i], x, y, widths[i] + pad, S(30), TRUE);
+        x += widths[i] + pad + S(8);
+    }
+}
 
+/* Settings page: fields, combo boxes, check boxes and their tips. */
+static void layout_settings(HWND hwnd, const RECT *rc)
+{
+    RECT c = *rc;
+    (void)hwnd; (void)c;
     {
         int sp = (g_page == PAGE_SETTINGS) ? SW_SHOW : SW_HIDE;
 
@@ -94,7 +119,13 @@ void layout(HWND hwnd)
             }
         }
     }
+}
 
+/* Main page: the VPN button, list buttons, profiles and their buttons. */
+static void layout_utgard(HWND hwnd, const RECT *rc)
+{
+    RECT c = *rc;
+    (void)hwnd; (void)c;
     MoveWindow(g_toggle, c.right - PAD - S(124), TABS_H + S(21), S(124), S(32), TRUE);
     SetWindowTextW(g_toggle, g_vpn_on ? L"Выключить" : L"Включить");
     EnableWindow(g_toggle, g_vpn_on ||
@@ -134,7 +165,13 @@ void layout(HWND hwnd)
                 InvalidateRect(g_plist, NULL, TRUE);
         }
     }
+}
 
+/* zapret page: strategy list and service controls, or the folder prompt. */
+static void layout_zapret(HWND hwnd, const RECT *rc)
+{
+    RECT c = *rc;
+    (void)hwnd; (void)c;
     if (g_zap.valid) {
         int list_top = TABS_H + S(448);
         int list_h   = c.bottom - FOOTER_H - S(12) - list_top;
@@ -161,7 +198,7 @@ void layout(HWND hwnd)
 
             ZeroMemory(&ti, sizeof ti);
             ti.cbSize = sizeof ti;
-            ti.hwnd   = c_hwnd;
+            ti.hwnd   = hwnd;
 
             for (i = 0; i < 4; i++) {
                 MoveWindow(ctl[i], PAD, TABS_H + S(rows[i]), S(250), S(30), TRUE);
@@ -209,7 +246,13 @@ void layout(HWND hwnd)
         SetWindowTextW(g_pick_path, L"Указать папку…");
         MoveWindow(g_pick_path, PAD, TABS_H + S(100), S(168), S(32), TRUE);
     }
+}
 
+/* Manual list editor. */
+static void layout_edit(HWND hwnd, const RECT *rc)
+{
+    RECT c = *rc;
+    (void)hwnd; (void)c;
     {
         int  ep = (g_page == PAGE_EDIT);
         int  field_w = c.right - PAD * 2 - S(84);
@@ -243,7 +286,13 @@ void layout(HWND hwnd)
         ShowWindow(g_ed_back, ep ? SW_SHOW : SW_HIDE);
         ShowWindow(g_ed_save, ep ? SW_SHOW : SW_HIDE);
     }
+}
 
+/* Process picker. */
+static void layout_pick(HWND hwnd, const RECT *rc)
+{
+    RECT c = *rc;
+    (void)hwnd; (void)c;
     {
         int pp = (g_page == PAGE_PICK) ? SW_SHOW : SW_HIDE;
 
@@ -260,7 +309,13 @@ void layout(HWND hwnd)
         ShowWindow(g_pk_save,   pp);
         EnableWindow(g_pk_save, g_pk_checked_n > 0);
     }
+}
 
+/* Site list page. */
+static void layout_hosts(HWND hwnd, const RECT *rc)
+{
+    RECT c = *rc;
+    (void)hwnd; (void)c;
     {
         int hp = (g_page == PAGE_HOSTS) ? SW_SHOW : SW_HIDE;
 
@@ -276,7 +331,13 @@ void layout(HWND hwnd)
         ShowWindow(g_h_tidy, hp);
         ShowWindow(g_h_save, hp);
     }
+}
 
+/* Application lists page. */
+static void layout_apps(HWND hwnd, const RECT *rc)
+{
+    RECT c = *rc;
+    (void)hwnd; (void)c;
     {
         int ap = (g_page == PAGE_APPS) ? SW_SHOW : SW_HIDE;
 
@@ -292,45 +353,52 @@ void layout(HWND hwnd)
         ShowWindow(g_app_pick,   ap);
         ShowWindow(g_app_manual, ap);
     }
+}
 
+/* PAC page. */
+static void layout_pac(HWND hwnd, const RECT *rc)
+{
+    RECT c = *rc;
+    (void)hwnd; (void)c;
     {
         int pp = (g_page == PAGE_PAC) ? SW_SHOW : SW_HIDE;
         int selected = pp ? pac_selected() : -1;
-        wchar_t selected_type[16] = L"";
         int table_top = TABS_H + S(78);
         int actions_y = c.bottom - FOOTER_H - S(42);
-        int source_w = c.right - PAD * 2 - S(70 + 60 + 100 + 110) - GetSystemMetrics(SM_CXVSCROLL) - S(8);
+        int source_w = c.right - PAD * 2 - S(70 + 60 + 130) - GetSystemMetrics(SM_CXVSCROLL) - S(8);
         HWND controls[] = { g_pac_list, g_pac_back, g_pac_file, g_pac_url,
-            g_pac_toggle, g_pac_refresh, g_pac_route, g_pac_delete, g_pac_help };
+            g_pac_toggle, g_pac_refresh, g_pac_delete, g_pac_help };
         size_t i;
-        if (selected >= 0)
-            ListView_GetItemText(g_pac_list, selected, 2, selected_type, 16);
         if (source_w < S(140)) source_w = S(140);
         ListView_SetColumnWidth(g_pac_list, 0, S(70));
         ListView_SetColumnWidth(g_pac_list, 1, source_w);
         ListView_SetColumnWidth(g_pac_list, 2, S(60));
-        ListView_SetColumnWidth(g_pac_list, 3, S(100));
-        ListView_SetColumnWidth(g_pac_list, 4, S(110));
+        ListView_SetColumnWidth(g_pac_list, 3, S(130));
         MoveWindow(g_pac_list, PAD, table_top, c.right - PAD * 2,
                    actions_y - S(8) - table_top, TRUE);
-        MoveWindow(g_pac_toggle, PAD, actions_y, S(148), S(30), TRUE);
-        MoveWindow(g_pac_refresh, PAD + S(156), actions_y, S(94), S(30), TRUE);
-        MoveWindow(g_pac_route, PAD + S(258), actions_y, S(176), S(30), TRUE);
-        MoveWindow(g_pac_delete, c.right - PAD - S(86), actions_y, S(86), S(30), TRUE);
-        MoveWindow(g_pac_help, c.right - PAD - S(130), TABS_H + S(14), S(130), S(24), TRUE);
-        MoveWindow(g_pac_back, PAD, c.bottom - FOOTER_H + S(4), S(100), S(30), TRUE);
-        MoveWindow(g_pac_file, PAD + S(108), c.bottom - FOOTER_H + S(4), S(132), S(30), TRUE);
-        MoveWindow(g_pac_url, PAD + S(248), c.bottom - FOOTER_H + S(4), S(132), S(30), TRUE);
+        {
+            HWND actions[] = { g_pac_toggle, g_pac_refresh, g_pac_delete };
+            HWND footer[]  = { g_pac_back, g_pac_file, g_pac_url };
+            int help_w = caption_w(g_pac_help) + S(4);    /* a link: no padding */
+            button_row(actions, 3, actions_y, c.right - PAD * 2);
+            button_row(footer, 3, c.bottom - FOOTER_H + S(4), c.right - PAD * 2);
+            MoveWindow(g_pac_help, c.right - PAD - help_w, TABS_H + S(14), help_w, S(24), TRUE);
+        }
         for (i = 0; i < sizeof controls / sizeof controls[0]; i++) ShowWindow(controls[i], pp);
         EnableWindow(g_pac_toggle, selected >= 0 && !g_busy);
         EnableWindow(g_pac_refresh, selected >= 0 && !g_busy);
-        EnableWindow(g_pac_route, selected >= 0 && !wcscmp(selected_type, L"URL") && !g_busy);
         EnableWindow(g_pac_delete, selected >= 0 && !g_busy);
         EnableWindow(g_pac_file, !g_busy);
         EnableWindow(g_pac_url, !g_busy);
         EnableWindow(g_pac_back, !g_busy);
     }
+}
 
+/* zapret action buttons, shown only with a valid folder. */
+static void layout_zapret_actions(HWND hwnd, const RECT *rc)
+{
+    RECT c = *rc;
+    (void)hwnd; (void)c;
     {
         int on = (g_page == PAGE_ZAPRET && g_zap.valid) ? SW_SHOW : SW_HIDE;
         ShowWindow(g_list,        on);
@@ -339,10 +407,13 @@ void layout(HWND hwnd)
         ShowWindow(g_zap_restart, on);
         ShowWindow(g_zap_start,   on);
     }
+}
 
-    ShowWindow(g_toggle,    g_page == PAGE_UTGARD ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_pick_path, g_page == PAGE_ZAPRET ? SW_SHOW : SW_HIDE);
-
+/* Greying while a job runs; last, so it overrides the rules above. */
+static void layout_busy(HWND hwnd, const RECT *rc)
+{
+    RECT c = *rc;
+    (void)hwnd; (void)c;
     /* While a job runs, every button that could start another is greyed.
        Done last so it overrides the ordinary rules above. */
     if (g_busy) {
@@ -351,7 +422,7 @@ void layout(HWND hwnd)
             g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts, g_pick_path, g_zap_list,
             g_h_save, g_h_tidy, g_h_back,
             g_pac_back, g_pac_file, g_pac_url, g_pac_toggle,
-            g_pac_refresh, g_pac_route, g_pac_delete,
+            g_pac_refresh, g_pac_delete,
             /* profiles are switched by index; the list itself is disabled above */
             g_prof_add, g_prof_del, g_prof_sub
         };
@@ -369,6 +440,34 @@ void layout(HWND hwnd)
         EnableWindow(g_pick_path, TRUE);
         EnableWindow(g_zap_list, TRUE);
     }
+}
+
+void layout(HWND hwnd)
+{
+    RECT c;
+    GetClientRect(hwnd, &c);
+
+    MoveWindow(g_tab_utgard, S(14),  S(6), S(96), S(28), TRUE);
+    MoveWindow(g_tab_zapret, S(112), S(6), S(96), S(28), TRUE);
+    MoveWindow(g_set_open, c.right - PAD - S(110), S(6), S(110), S(28), TRUE);
+    MoveWindow(g_ping_now, c.right - PAD - S(110) - S(8) - S(140), S(6), S(140), S(28), TRUE);
+    ShowWindow(g_ping_now, g_page == PAGE_UTGARD ? SW_SHOW : SW_HIDE);
+    EnableWindow(g_ping_now, !g_ping_busy && g_prof.count > 0);
+
+    layout_settings(hwnd, &c);
+    layout_utgard(hwnd, &c);
+    layout_zapret(hwnd, &c);
+    layout_edit(hwnd, &c);
+    layout_pick(hwnd, &c);
+    layout_hosts(hwnd, &c);
+    layout_apps(hwnd, &c);
+    layout_pac(hwnd, &c);
+    layout_zapret_actions(hwnd, &c);
+
+    ShowWindow(g_toggle,    g_page == PAGE_UTGARD ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_pick_path, g_page == PAGE_ZAPRET ? SW_SHOW : SW_HIDE);
+
+    layout_busy(hwnd, &c);
 
     /* children are not repainted by invalidating the parent */
     InvalidateRect(g_tab_utgard, NULL, TRUE);

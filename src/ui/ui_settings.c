@@ -108,20 +108,35 @@ void upd_start(HWND hwnd, int manual)
     EnableWindow(g_set_upd_now, FALSE);
 }
 
-void upd_prompt(HWND hwnd)
-{
-    wchar_t text[256], tag[32];
+int upd_running(void) { return g_upd_busy; }
 
+/* The question for a found newer release; 0 when there is none to ask. */
+int upd_question(wchar_t *text, size_t cap)
+{
+    wchar_t tag[32];
+    if (!g_upd_tag[0] || !update_is_newer(g_upd_tag, UTGARD_VERSION)) return 0;
     /* The tag passed update_tag_from_location: ASCII only. */
     MultiByteToWideChar(CP_UTF8, 0, g_upd_tag, -1, tag, 32);
-    StringCchPrintfW(text, 256, L"Вышла новая версия Utgard: %s (у вас %s).\r\n\r\n"
-                                L"Открыть страницу загрузки?",
-                     tag, UTGARD_VERSION_W);
-    if (MessageBoxW(hwnd, text, L"Utgard", MB_ICONINFORMATION | MB_YESNO) != IDYES) return;
+    return SUCCEEDED(StringCchPrintfW(text, cap, L"Вышла новая версия Utgard: %s (у вас %s).\n\n"
+                                                 L"Открыть страницу загрузки?",
+                                      tag, UTGARD_VERSION_W));
+}
+
+void upd_open_page(HWND hwnd)
+{
     if (!shell_open_unelevated(UTGARD_RELEASES_URL))
         MessageBoxW(hwnd, L"Не удалось открыть браузер. Скачайте новую версию здесь "
                           L"(Ctrl+C копирует этот текст):\r\n\r\n" UTGARD_RELEASES_URL,
                     L"Utgard", MB_ICONINFORMATION | MB_OK);
+}
+
+void upd_prompt(HWND hwnd)
+{
+    wchar_t  text[256];
+    ask_step step = { L"Обновление", text, L"Открыть страницу", L"Позже", 0 };
+    if (!upd_question(text, 256)) return;
+    ask_steps(hwnd, L"Utgard", &step, 1);
+    if (step.answer) upd_open_page(hwnd);
 }
 
 void upd_done(HWND hwnd, upd_job *j)
@@ -129,10 +144,18 @@ void upd_done(HWND hwnd, upd_job *j)
     g_upd_busy = 0;
     EnableWindow(g_set_upd_now, TRUE);
 
+    if (!j->manual && startup_notice_waiting() &&
+        (!j->ok || !update_is_newer(j->tag, UTGARD_VERSION))) {
+        free(j);
+        startup_notice(hwnd);           /* nothing newer: the other questions */
+        return;
+    }
     if (!j->ok) {
         if (j->manual) problem(hwnd, j->err[0] ? j->err : L"Не удалось проверить обновления");
     } else if (update_is_newer(j->tag, UTGARD_VERSION)) {
         StringCchCopyA(g_upd_tag, sizeof g_upd_tag, j->tag);
+        /* At start the answer joins the other first-run questions. */
+        if (!j->manual && startup_notice_waiting()) { free(j); startup_notice(hwnd); return; }
         if (j->manual || (IsWindowVisible(hwnd) && !g_modal)) upd_prompt(hwnd);
         else g_upd_pending = 1;
     } else if (j->manual) {

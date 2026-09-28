@@ -1,5 +1,6 @@
 #include "coredir.h"
 #include "singbox.h"
+#include "defconfig.h"
 
 #include <tlhelp32.h>
 #include <bcrypt.h>
@@ -116,56 +117,6 @@ int singbox_running(void)
     return 1;
 }
 
-/* The base config the user owns. Written once, when it is missing, so a bare
-   executable dropped into an empty folder has something to start from. It is
-   never rewritten afterwards - from then on the file is the user's. */
-static const char DEFAULT_CONFIG[] =
-    "{\n"
-    "  \"log\": {\n"
-    "    \"level\": \"info\",\n"
-    "    \"timestamp\": true,\n"
-    "    \"output\": \"logs/sing-box.log\"\n"
-    "  },\n"
-    "\n"
-    "  \"dns\": {\n"
-    "    \"servers\": [\n"
-    "      { \"tag\": \"local\", \"type\": \"local\" },\n"
-    "      {\n"
-    "        \"tag\": \"doh\",\n"
-    "        \"type\": \"h3\",\n"
-    "        \"server\": \"dns.google\",\n"
-    "        \"server_port\": 443,\n"
-    "        \"path\": \"/dns-query\",\n"
-    "        \"domain_resolver\": \"local\"\n"
-    "      }\n"
-    "    ],\n"
-    "    \"rules\": [\n"
-    "      { \"rule_set\": [\"general\"], \"server\": \"doh\" }\n"
-    "    ],\n"
-    "    \"final\": \"local\",\n"
-    "    \"strategy\": \"ipv4_only\"\n"
-    "  },\n"
-    "\n"
-    "  \"inbounds\": [\n"
-    "    {\n"
-    "      \"type\": \"tun\",\n"
-    "      \"tag\": \"tun-in\",\n"
-    "      \"address\": [\"172.30.30.1/30\"],\n"
-    "      \"mtu\": 1430,\n"
-    "      \"auto_route\": true,\n"
-    "      \"strict_route\": false,\n"
-    "      \"stack\": \"system\"\n"
-    "    }\n"
-    "  ],\n"
-    "\n"
-    "  \"route\": {\n"
-    "    \"auto_detect_interface\": true,\n"
-    "    \"default_domain_resolver\": \"local\",\n"
-    "    \"final\": \"direct\",\n"
-    "    \"rules\": []\n"
-    "  }\n"
-    "}\n"
-    "\n";
 
 int singbox_seed_config(void)
 {
@@ -200,7 +151,7 @@ int singbox_seed_config(void)
     /* Atomic, not merely create-only: an interrupted plain write would leave
        a truncated config.json that, since the file then exists, would never
        be re-seeded. */
-    return file_write(path, DEFAULT_CONFIG, sizeof DEFAULT_CONFIG - 1);
+    return file_write(path, utgard_default_config, utgard_default_config_len);
 }
 
 int singbox_present(void)
@@ -649,6 +600,23 @@ int singbox_compile_list(wchar_t *msg, size_t cap)
 
 /* ---- start ---------------------------------------------------------- */
 
+/* One previous journal is kept: at start, a logs\sing-box.log over 5 MiB
+   becomes sing-box.log.1, replacing the older one. Start is the only safe
+   moment - sing-box holds the file open while it runs. A path changed in
+   config.json by the user is left alone. */
+#define LOG_ROTATE_BYTES (5u * 1024u * 1024u)
+
+static void rotate_log(const wchar_t *logs)
+{
+    wchar_t current[MAX_PATH * 2], previous[MAX_PATH * 2];
+    WIN32_FILE_ATTRIBUTE_DATA info;
+    if (FAILED(StringCchPrintfW(current, MAX_PATH * 2, L"%s\\sing-box.log", logs)) ||
+        FAILED(StringCchPrintfW(previous, MAX_PATH * 2, L"%s\\sing-box.log.1", logs)) ||
+        !GetFileAttributesExW(current, GetFileExInfoStandard, &info)) return;
+    if (!info.nFileSizeHigh && info.nFileSizeLow < LOG_ROTATE_BYTES) return;
+    MoveFileExW(current, previous, MOVEFILE_REPLACE_EXISTING);
+}
+
 int singbox_start(const char *config, HANDLE job, HANDLE *process,
                   wchar_t *msg, size_t cap)
 {
@@ -671,8 +639,10 @@ int singbox_start(const char *config, HANDLE job, HANDLE *process,
 
     /* The config writes into logs/ relative to the working directory, and
        sing-box will not create that directory itself. */
-    if (SUCCEEDED(StringCchPrintfW(logs, MAX_PATH * 2, L"%slogs", root)))
+    if (SUCCEEDED(StringCchPrintfW(logs, MAX_PATH * 2, L"%slogs", root))) {
         CreateDirectoryW(logs, NULL);
+        rotate_log(logs);
+    }
 
     if (FAILED(StringCchPrintfW(cmd, 2048, L"\"%s\" run -c stdin", exe)))
         return say(msg, cap, L"Слишком длинный путь");

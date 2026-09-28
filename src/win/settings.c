@@ -20,10 +20,17 @@ const int settings_sub_hours[] = { 3, 6, 12 };
 const int settings_sub_count =
     (int)(sizeof settings_sub_hours / sizeof settings_sub_hours[0]);
 
+/* NextDNS without a profile ID: the path stays "/", since a path segment
+   there is read as the profile. HTTP/3 has its own host at NextDNS. */
 const dns_preset settings_dns[] = {
-    { "dns.google",         L"Google" },
-    { "cloudflare-dns.com", L"Cloudflare" },
-    { "dns.quad9.net",      L"Quad9" }
+    { "dns.google",          "h3",    NULL, L"Google — HTTP/3" },
+    { "dns.google",          "https", NULL, L"Google — HTTP/2" },
+    { "cloudflare-dns.com",  "h3",    NULL, L"Cloudflare — HTTP/3" },
+    { "cloudflare-dns.com",  "https", NULL, L"Cloudflare — HTTP/2" },
+    { "dns.quad9.net",       "h3",    NULL, L"Quad9 — HTTP/3" },
+    { "dns.quad9.net",       "https", NULL, L"Quad9 — HTTP/2" },
+    { "doh3.dns.nextdns.io", "h3",    "/",  L"NextDNS — HTTP/3" },
+    { "dns.nextdns.io",      "https", "/",  L"NextDNS — HTTP/2" }
 };
 const int settings_dns_count =
     (int)(sizeof settings_dns / sizeof settings_dns[0]);
@@ -38,6 +45,7 @@ void settings_defaults(app_settings *s)
     s->update_check  = 1;
     s->sub_interval  = SETTINGS_SUB_DEFAULT;
     s->sub_last      = 0;
+    s->pac_last      = 0;
 }
 
 static int settings_path(wchar_t *out, size_t cap)
@@ -90,9 +98,18 @@ int settings_load(app_settings *s)
             for (i = 0; i < settings_stack_count; i++)
                 if (strcmp(eq + 1, settings_stacks[i]) == 0) s->stack = i;
         } else if (strcmp(line, "dns") == 0) {
+            /* "host/type"; a bare host is from before HTTP/2 was offered and
+               means that host over HTTP/3. */
             int i;
-            for (i = 0; i < settings_dns_count; i++)
-                if (strcmp(eq + 1, settings_dns[i].host) == 0) s->dns = i;
+            for (i = 0; i < settings_dns_count; i++) {
+                size_t n = strlen(settings_dns[i].host);
+                if (strncmp(eq + 1, settings_dns[i].host, n) != 0) continue;
+                if ((eq[1 + n] == '\0' && !strcmp(settings_dns[i].type, "h3")) ||
+                    (eq[1 + n] == '/' && !strcmp(eq + 2 + n, settings_dns[i].type))) {
+                    s->dns = i;
+                    break;
+                }
+            }
         } else if (strcmp(line, "tray_on_close") == 0) {
             s->tray_on_close = (eq[1] == '1');
         } else if (strcmp(line, "update_check") == 0) {
@@ -105,6 +122,9 @@ int settings_load(app_settings *s)
         } else if (strcmp(line, "sub_last") == 0) {
             long long v = _strtoi64(eq + 1, NULL, 10);
             if (v > 0) s->sub_last = v;
+        } else if (strcmp(line, "pac_last") == 0) {
+            long long v = _strtoi64(eq + 1, NULL, 10);
+            if (v > 0) s->pac_last = v;
         }
     }
     return 1;
@@ -125,11 +145,11 @@ int settings_save(const app_settings *s)
 
     if (!settings_path(path, MAX_PATH * 2)) return 0;
     if (FAILED(StringCchPrintfA(buf, sizeof buf,
-            "mtu=%d\r\nlog_level=%s\r\nstack=%s\r\ndns=%s\r\ntray_on_close=%d\r\nupdate_check=%d\r\n"
-            "sub_interval_hours=%d\r\nsub_last=%lld\r\n",
+            "mtu=%d\r\nlog_level=%s\r\nstack=%s\r\ndns=%s/%s\r\ntray_on_close=%d\r\nupdate_check=%d\r\n"
+            "sub_interval_hours=%d\r\nsub_last=%lld\r\npac_last=%lld\r\n",
             s->mtu, settings_log_levels[lvl], settings_stacks[stk],
-            settings_dns[dns].host, s->tray_on_close ? 1 : 0, s->update_check ? 1 : 0,
-            settings_sub_hours[sub], s->sub_last)))
+            settings_dns[dns].host, settings_dns[dns].type, s->tray_on_close ? 1 : 0, s->update_check ? 1 : 0,
+            settings_sub_hours[sub], s->sub_last, s->pac_last)))
         return 0;
 
     return file_write(path, buf, strlen(buf));

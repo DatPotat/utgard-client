@@ -79,7 +79,6 @@
 #define ID_PAC_REFRESH 1005
 #define ID_PAC_DELETE 1006
 #define ID_PAC_HELP   1007
-#define ID_PAC_ROUTE  1008
 #define ID_APPS_LIST  501
 #define ID_APPS_BACK  502
 #define ID_APPS_PICK  503
@@ -94,6 +93,7 @@
 #define ID_PICK_SAVE  704
 #define TIMER_PICK    2
 #define TIMER_SUB     3     /* checks once a minute whether the subscription is due */
+#define TIMER_NOTICE  4     /* first-run questions: stop waiting for the update check */
 /* The manual editor: two sections, each a stack of rows made of a field,
    a plus and a minus. The rows are created once and shown as needed, so
    adding or removing one never destroys what is typed in the others. */
@@ -245,7 +245,6 @@ extern int g_awg_ready;         /* the AmneziaWG core is downloaded and intact *
 extern HWND g_btn_hosts, g_btn_apps, g_btn_pac, g_zap_fix;
 extern HWND g_pac_list, g_pac_back, g_pac_file, g_pac_url, g_pac_toggle;
 extern HWND g_pac_refresh, g_pac_delete, g_pac_help;
-extern HWND g_pac_route;
 extern HWND g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts, g_tip;
 extern HWND g_alist, g_app_back, g_app_pick, g_app_manual;
 extern WNDPROC g_alist_prev;
@@ -352,7 +351,7 @@ void on_pick_path(HWND hwnd);
 void profiles_reload(void);
 int profile_selected(void);
 void ping_start(HWND hwnd);
-void subscription_apply(HWND hwnd, const wchar_t *url, const char *body, size_t len, int silent);
+int  subscription_apply(HWND hwnd, const wchar_t *url, const char *body, size_t len, int silent);
 void act_subscription(HWND hwnd);
 void sub_auto_check(HWND hwnd);
 int  offer_install(HWND hwnd);
@@ -392,15 +391,25 @@ void ed_add(HWND hwnd, HWND *rows, int *count);
 void ed_save(HWND hwnd);
 
 /* ---- ui_pac.c ---- */
-enum { PAC_UI_REFRESH = 2, PAC_UI_TOGGLE, PAC_UI_DELETE, PAC_UI_ROUTE };
+enum { PAC_UI_REFRESH = 2, PAC_UI_TOGGLE, PAC_UI_DELETE };
 int pac_selected(void);
 void pac_reload(void);
 void pac_open_page(HWND hwnd);
+void pac_auto_check(HWND hwnd);
+/* ui_vpn.c: the first-run questions in one window */
+extern int g_awg_after_singbox;
+int  startup_notice_waiting(void);
+void startup_notice_begin(HWND hwnd);
+void startup_notice_timer(HWND hwnd);
+void startup_notice_shown(HWND hwnd);
+void startup_notice(HWND hwnd);
+void offer_awg_download(HWND hwnd);
+LRESULT CALLBACK pac_list_proc(HWND list, UINT msg, WPARAM wp, LPARAM lp,
+                               UINT_PTR id, DWORD_PTR ref);
 void pac_back(HWND hwnd);
 void pac_add_file(HWND hwnd);
 void pac_add_url(HWND hwnd);
 void pac_action(HWND hwnd, int op);
-void pac_show_help(HWND hwnd);
 
 /* ---- ui_settings.c ---- */
 
@@ -408,6 +417,9 @@ void set_open(HWND hwnd);
 void set_save(HWND hwnd);
 void upd_start(HWND hwnd, int manual);
 void upd_prompt(HWND hwnd);
+int  upd_running(void);
+int  upd_question(wchar_t *text, size_t cap);
+void upd_open_page(HWND hwnd);
 void upd_done(HWND hwnd, upd_job *j);
 
 #endif

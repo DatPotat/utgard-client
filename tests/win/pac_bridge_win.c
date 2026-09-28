@@ -193,13 +193,9 @@ int main(int argc, char **argv)
     activate_pair();
     result = test_tcp(&in, tp); printf("Multiple PAC (DIRECT + proxy): %d\n", result); ok &= result;
     swprintf(url, 100, L"http://127.0.0.1:%u/test.pac?version=1", hp);
-    result = net_fetch_pac(url, 0, NULL, &body, &length, err, 256);
+    result = net_fetch_pac(url, &body, &length, err, 256);
     result = result && length == 8 && !memcmp(body, "pac-test", 8);
     printf("Direct PAC download: %d\n", result); ok &= result; free(body); body = NULL;
-    result = net_fetch_pac(url, (unsigned short)in.vpn_proxy_port,
-                           in.proxy_password, &body, &length, err, 256);
-    result = result && length == 8 && !memcmp(body, "pac-test", 8);
-    printf("VPN PAC download: %d\n", result); ok &= result; free(body); body = NULL;
     result = pacbridge_count() == 2;
     printf("Active PAC lists: %d (count=%d)\n", result, pacbridge_count());
     ok &= result;

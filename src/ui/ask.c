@@ -389,3 +389,207 @@ int ask_string(HWND owner, const wchar_t *title, const wchar_t *hint,
     return st.done == 1 && out[0] != L'\0';
 }
 
+/* ---- ask_steps -------------------------------------------------------- */
+
+#define ID_STEP_YES 1101
+#define ID_STEP_NO  1102
+
+typedef struct {
+    ask_step *steps;
+    int       count, current, text_h, done;
+    HWND      yes, no;
+} steps_state;
+
+static int steps_text_top(const steps_state *st) { return st->count > 1 ? S(56) : S(18); }
+
+static int caption_width(HWND b)
+{
+    wchar_t text[64];
+    SIZE    size = { 0, 0 };
+    int     n = GetWindowTextW(b, text, 64);
+    HDC     dc = GetDC(b);
+    HGDIOBJ old;
+    if (!dc) return S(120);
+    old = SelectObject(dc, g_ask_font);
+    GetTextExtentPoint32W(dc, text, n, &size);
+    SelectObject(dc, old);
+    ReleaseDC(b, dc);
+    return size.cx + S(32);
+}
+
+/* Captions of the current step, right-aligned: [no] [yes]. */
+static void steps_place(HWND hwnd, steps_state *st)
+{
+    RECT c;
+    int  y = steps_text_top(st) + st->text_h + S(18), yw, nw;
+    GetClientRect(hwnd, &c);
+    SetWindowTextW(st->yes, st->steps[st->current].yes);
+    SetWindowTextW(st->no,  st->steps[st->current].no);
+    yw = caption_width(st->yes);
+    nw = caption_width(st->no);
+    MoveWindow(st->yes, c.right - S(16) - yw, y, yw, S(30), TRUE);
+    MoveWindow(st->no,  c.right - S(16) - yw - S(8) - nw, y, nw, S(30), TRUE);
+    InvalidateRect(hwnd, NULL, TRUE);
+}
+
+static void steps_answer(HWND hwnd, steps_state *st, int answer)
+{
+    st->steps[st->current].answer = answer;
+    if (++st->current >= st->count) { st->done = 1; return; }
+    steps_place(hwnd, st);
+    SetFocus(st->yes);
+}
+
+static void steps_paint(HWND hwnd, steps_state *st)
+{
+    PAINTSTRUCT ps;
+    HDC         dc = BeginPaint(hwnd, &ps);
+    RECT        c, t;
+    HGDIOBJ     old;
+    int         i, x = S(16);
+    GetClientRect(hwnd, &c);
+    FillRect(dc, &c, g_ask_bg);
+    SetBkMode(dc, TRANSPARENT);
+    old = SelectObject(dc, g_ask_font);
+    if (st->count > 1) {
+        for (i = 0; i < st->count; i++) {
+            SIZE size = { 0, 0 };
+            const wchar_t *label = st->steps[i].tab;
+            COLORREF color = i == st->current ? g_ask_text
+                           : (i < st->current && st->steps[i].answer) ? ask_color(ASK_OK) : g_ask_muted;
+            GetTextExtentPoint32W(dc, label, (int)wcslen(label), &size);
+            SetTextColor(dc, color);
+            TextOutW(dc, x, S(16), label, (int)wcslen(label));
+            if (i == st->current) {
+                HBRUSH accent = CreateSolidBrush(ask_color(ASK_ACCENT));
+                RECT   under = { x, S(16) + size.cy + S(6), x + size.cx, S(16) + size.cy + S(8) };
+                if (accent) { FillRect(dc, &under, accent); DeleteObject(accent); }
+            }
+            x += size.cx + S(24);
+        }
+        t.left = 0; t.right = c.right; t.top = S(44); t.bottom = S(45);
+        FillRect(dc, &t, g_ask_line);
+    }
+    SetTextColor(dc, g_ask_text);
+    t.left = S(16); t.right = c.right - S(16);
+    t.top = steps_text_top(st); t.bottom = t.top + st->text_h;
+    DrawTextW(dc, st->steps[st->current].text, -1, &t, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
+    SelectObject(dc, old);
+    EndPaint(hwnd, &ps);
+}
+
+static LRESULT CALLBACK steps_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    steps_state *st = (steps_state *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    switch (msg) {
+    case WM_CREATE: {
+        CREATESTRUCTW *cs = (CREATESTRUCTW *)lp;
+        st = (steps_state *)cs->lpCreateParams;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)st);
+        st->no = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                                 0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_STEP_NO, cs->hInstance, NULL);
+        st->yes = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                                  0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_STEP_YES, cs->hInstance, NULL);
+        SetWindowLongPtrW(st->no, GWLP_USERDATA, ASK_BTN_SECONDARY);
+        SetWindowLongPtrW(st->yes, GWLP_USERDATA, ASK_BTN_PRIMARY);
+        ask_hover_attach(st->no);
+        ask_hover_attach(st->yes);
+        SendMessageW(st->no, WM_SETFONT, (WPARAM)g_ask_font, TRUE);
+        SendMessageW(st->yes, WM_SETFONT, (WPARAM)g_ask_font, TRUE);
+        steps_place(hwnd, st);
+        return 0;
+    }
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PAINT:
+        if (st) steps_paint(hwnd, st);
+        else DefWindowProcW(hwnd, msg, wp, lp);
+        return 0;
+    case WM_DRAWITEM:
+        if (g_draw) g_draw((const DRAWITEMSTRUCT *)lp);
+        return TRUE;
+    case WM_COMMAND:
+        if (st && !st->done) {
+            if (LOWORD(wp) == ID_STEP_YES) steps_answer(hwnd, st, 1);
+            else if (LOWORD(wp) == ID_STEP_NO) steps_answer(hwnd, st, 0);
+        }
+        return 0;
+    case WM_CLOSE:
+        if (st) st->done = 1;       /* the rest stay "no" */
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+void ask_steps(HWND owner, const wchar_t *title, ask_step *steps, int count)
+{
+    steps_state st;
+    HINSTANCE   inst = (HINSTANCE)GetWindowLongPtrW(owner, GWLP_HINSTANCE);
+    WNDCLASSEXW wc;
+    HWND        hwnd;
+    RECT        o, want;
+    MSG         msg;
+    DWORD       style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
+    int         i;
+    static int  registered;
+
+    if (!steps || count <= 0) return;
+    if (count > ASK_STEPS_MAX) count = ASK_STEPS_MAX;
+    for (i = 0; i < count; i++) steps[i].answer = 0;
+    ZeroMemory(&st, sizeof st);
+    st.steps = steps;
+    st.count = count;
+
+    /* The tallest question sets the height, so the window does not jump
+       between tabs. */
+    {
+        HDC     dc  = GetDC(owner);
+        HGDIOBJ old = SelectObject(dc, g_ask_font);
+        for (i = 0; i < count; i++) {
+            RECT t = { 0, 0, S(428), 0 };
+            DrawTextW(dc, steps[i].text, -1, &t, DT_CALCRECT | DT_WORDBREAK | DT_LEFT | DT_NOPREFIX);
+            if (t.bottom - t.top > st.text_h) st.text_h = t.bottom - t.top;
+        }
+        SelectObject(dc, old);
+        ReleaseDC(owner, dc);
+    }
+
+    if (!registered) {
+        ZeroMemory(&wc, sizeof wc);
+        wc.cbSize        = sizeof wc;
+        wc.lpfnWndProc   = steps_proc;
+        wc.hInstance     = inst;
+        wc.hCursor       = LoadCursorW(NULL, IDC_ARROW);
+        wc.hbrBackground = g_ask_bg;
+        wc.lpszClassName = L"UtgardSteps";
+        RegisterClassExW(&wc);
+        registered = 1;
+    }
+
+    want.left = 0; want.top = 0; want.right = S(460);
+    want.bottom = steps_text_top(&st) + st.text_h + S(18) + S(30) + S(16);
+    AdjustWindowRectExForDpi(&want, style, FALSE, 0, (UINT)S(96));
+    GetWindowRect(owner, &o);
+    hwnd = CreateWindowExW(WS_EX_DLGMODALFRAME, L"UtgardSteps", title, style,
+                           o.left + ((o.right - o.left) - (want.right - want.left)) / 2,
+                           o.top + S(100), want.right - want.left, want.bottom - want.top,
+                           owner, NULL, inst, &st);
+    if (!hwnd) return;
+
+    EnableWindow(owner, FALSE);
+    ShowWindow(hwnd, SW_SHOW);
+    SetFocus(st.yes);
+    while (!st.done && GetMessageW(&msg, NULL, 0, 0) > 0) {
+        if (msg.message == WM_KEYDOWN && (msg.hwnd == hwnd || IsChild(hwnd, msg.hwnd))) {
+            if (msg.wParam == VK_ESCAPE) { st.done = 1; continue; }
+            if (msg.wParam == VK_RETURN) { steps_answer(hwnd, &st, GetFocus() != st.no); continue; }
+        }
+        if (!IsDialogMessageW(hwnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    EnableWindow(owner, TRUE);
+    SetActiveWindow(owner);
+    DestroyWindow(hwnd);
+}

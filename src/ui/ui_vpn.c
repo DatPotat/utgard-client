@@ -127,8 +127,8 @@ static DWORD WINAPI sub_thread(LPVOID param)
 
 /* Replace the profiles that came from this subscription, leave every other
    profile alone, and try to keep the same one active. */
-void subscription_apply(HWND hwnd, const wchar_t *url,
-                               const char *body, size_t len, int silent)
+int subscription_apply(HWND hwnd, const wchar_t *url,
+                       const char *body, size_t len, int silent)
 {
     static link_profile  fetched[PROFILES_MAX];
     static profile_entry keep[PROFILES_MAX];
@@ -141,7 +141,7 @@ void subscription_apply(HWND hwnd, const wchar_t *url,
     if (WideCharToMultiByte(CP_UTF8, 0, url, -1, url8, (int)sizeof url8,
                             NULL, NULL) == 0) {
         problem(hwnd, L"Слишком длинный адрес подписки");
-        return;
+        return 0;
     }
 
     n = link_parse_subscription(body, len, fetched, PROFILES_MAX, &skipped,
@@ -153,7 +153,8 @@ void subscription_apply(HWND hwnd, const wchar_t *url,
             to_wide(err, msg, 320);
             problem(hwnd, msg);
         }
-        return;
+        SecureZeroMemory(fetched, sizeof fetched);
+        return 0;
     }
 
     had_active = (g_prof.active >= 0 && g_prof.active < g_prof.count);
@@ -216,10 +217,16 @@ void subscription_apply(HWND hwnd, const wchar_t *url,
     }
     (void)skipped;
 
+    /* Credentials passed through these; wipe them like the profiles. */
+    SecureZeroMemory(fetched, sizeof fetched);
+    SecureZeroMemory(keep, sizeof keep);
+    SecureZeroMemory(&was_active, sizeof was_active);
+
     profiles_reload();
     ping_start(hwnd);
     exc_check_start(hwnd);
     layout(hwnd);
+    return 1;
 }
 
 void act_subscription(HWND hwnd)
@@ -298,12 +305,10 @@ static DWORD WINAPI install_thread(LPVOID param)
 
 /* Asks first. The download is 21 MB from GitHub, and a client that reaches out
    on its own the first time it starts is not something to do silently. */
-int offer_install(HWND hwnd)
+/* The question to ask about sing-box; 0 when none is needed (installed and
+   right, or a problem already reported). */
+static int singbox_question(HWND hwnd, wchar_t *question, size_t cap)
 {
-    wchar_t      question[900];
-    install_job *job;
-    HANDLE       th;
-
     if (g_installing) return 0;
 
     /* Present but not the pinned release - an older version left over, or a
@@ -324,29 +329,28 @@ int offer_install(HWND hwnd)
                           L"Выключите VPN, и программа предложит скачать правильную.");
             return 0;
         }
-        StringCchPrintfW(question, 900,
+        StringCchPrintfW(question, cap,
             L"Установленный sing-box не совпадает с версией %s — это старая "
             L"версия или изменённый файл. Запускать его программа не будет.\n\n"
             L"Скачать правильную версию сейчас?", singbox_version());
-        if (modal_box(hwnd, question, L"sing-box",
-                      MB_ICONWARNING | MB_YESNO) != IDYES)
-            return 0;
-        goto start_install;
+        return 1;
     }
 
-    StringCchPrintfW(question, 900,
+    StringCchPrintfW(question, cap,
         L"Не найден sing-box — без него VPN работать не может.\n\n"
         L"Скачать его сейчас?\n\n"
         L"Если не хотите скачивать автоматически — загрузите с GitHub архив %s "
         L"и положите его файлы в папку sing-box рядом с программой. "
         L"Другие версии и сборки программа не запустит.",
         singbox_archive());
+    return 1;
+}
 
-    if (modal_box(hwnd, question, L"Первый запуск",
-                  MB_ICONQUESTION | MB_YESNO) != IDYES)
-        return 0;
+static int singbox_install_start(HWND hwnd)
+{
+    install_job *job;
+    HANDLE       th;
 
-start_install:
     job = (install_job *)calloc(1, sizeof *job);
     if (!job) { problem(hwnd, L"Не хватило памяти"); return 0; }
     job->hwnd = hwnd;
@@ -360,19 +364,25 @@ start_install:
     return 1;
 }
 
+int offer_install(HWND hwnd)
+{
+    wchar_t  question[900];
+    ask_step step = { L"sing-box", question, L"Скачать", L"Не сейчас", 0 };
+    if (!singbox_question(hwnd, question, 900)) return 0;
+    ask_steps(hwnd, L"sing-box", &step, 1);
+    return step.answer ? singbox_install_start(hwnd) : 0;
+}
+
 /* The AmneziaWG core, asked for when a profile first needs it. On success
    the switch-on the user asked for carries on by itself. */
-void offer_awg_install(HWND hwnd, int resume)
+static const wchar_t *awg_question(int resume)
 {
-    install_job *job;
-    HANDLE       th;
-    wchar_t      dir[MAX_PATH * 2];
-
-    if (g_installing || g_awg_ready) return;
+    wchar_t dir[MAX_PATH * 2];
+    if (g_installing || g_awg_ready) return NULL;
     /* On FAT32 it can never run; asking at start would only nag. */
     if (!resume && (!coredir_path(&CORE_AWG, dir, MAX_PATH * 2) || !coredir_volume_has_acl(dir)))
-        return;
-    if (modal_box(hwnd, resume
+        return NULL;
+    return resume
             ? L"Для профиля AmneziaWG нужно ядро AmneziaWG — официальный пакет "
               L"amneziawg-windows-client с GitHub.\n\n"
               L"Программа проверит его контрольную сумму и возьмёт из него два файла "
@@ -384,9 +394,13 @@ void offer_awg_install(HWND hwnd, int resume)
               L"GitHub: программа проверит его контрольную сумму и возьмёт из него два "
               L"файла в папку amneziawg. В систему ничего не устанавливается.\n\n"
               L"Если профили AmneziaWG не нужны, можно отказаться — программа спросит "
-              L"снова, когда такой профиль понадобится.",
-            L"AmneziaWG", MB_ICONQUESTION | MB_YESNO) != IDYES)
-        return;
+              L"снова, когда такой профиль понадобится.";
+}
+
+static void awg_install_start(HWND hwnd, int resume)
+{
+    install_job *job;
+    HANDLE       th;
 
     job = (install_job *)calloc(1, sizeof *job);
     if (!job) { problem(hwnd, L"Не хватило памяти"); return; }
@@ -398,6 +412,89 @@ void offer_awg_install(HWND hwnd, int resume)
     CloseHandle(th);
     g_installing = 2;
     layout(hwnd);
+}
+
+/* Already answered yes (at start): download without asking again. */
+void offer_awg_download(HWND hwnd)
+{
+    if (!g_installing && !g_awg_ready) awg_install_start(hwnd, 0);
+}
+
+void offer_awg_install(HWND hwnd, int resume)
+{
+    const wchar_t *text = awg_question(resume);
+    ask_step step = { L"AmneziaWG", NULL, L"Скачать", L"Не сейчас", 0 };
+    if (!text) return;
+    step.text = text;
+    ask_steps(hwnd, L"AmneziaWG", &step, 1);
+    if (step.answer) awg_install_start(hwnd, resume);
+}
+
+/* The first-run questions - a newer release, sing-box, AmneziaWG - in one
+   window, one tab each, in that order. Held back until the start-up update
+   check answers (or 6 s pass), and until the window is shown. */
+static int notice_wait, notice_pending;
+
+int startup_notice_waiting(void) { return notice_wait; }
+
+void startup_notice_begin(HWND hwnd)
+{
+    if (upd_running()) {
+        notice_wait = 1;
+        SetTimer(hwnd, TIMER_NOTICE, 6000, NULL);
+    } else startup_notice(hwnd);
+}
+
+void startup_notice_timer(HWND hwnd)
+{
+    KillTimer(hwnd, TIMER_NOTICE);
+    if (notice_wait) startup_notice(hwnd);
+}
+
+void startup_notice_shown(HWND hwnd)
+{
+    if (notice_pending) startup_notice(hwnd);
+    else if (g_upd_pending) { g_upd_pending = 0; upd_prompt(hwnd); }
+}
+
+void startup_notice(HWND hwnd)
+{
+    wchar_t        update_text[256], singbox_text[900];
+    const wchar_t *awg_text;
+    ask_step       steps[3];
+    int            count = 0, update = -1, singbox = -1, awg = -1, installing = 0;
+
+    notice_wait = 0;
+    KillTimer(hwnd, TIMER_NOTICE);
+    if (!IsWindowVisible(hwnd)) { notice_pending = 1; return; }
+    notice_pending = 0;
+    g_upd_pending = 0;
+
+    if (upd_question(update_text, 256)) {
+        steps[count].tab = L"Обновление"; steps[count].text = update_text;
+        steps[count].yes = L"Открыть страницу"; steps[count].no = L"Позже";
+        update = count++;
+    }
+    if (singbox_question(hwnd, singbox_text, 900)) {
+        steps[count].tab = L"sing-box"; steps[count].text = singbox_text;
+        steps[count].yes = L"Скачать"; steps[count].no = L"Не сейчас";
+        singbox = count++;
+    }
+    if ((awg_text = awg_question(0)) != NULL) {
+        steps[count].tab = L"AmneziaWG"; steps[count].text = awg_text;
+        steps[count].yes = L"Скачать"; steps[count].no = L"Не сейчас";
+        awg = count++;
+    }
+    if (!count) return;
+    ask_steps(hwnd, L"Utgard", steps, count);
+
+    if (update >= 0 && steps[update].answer) upd_open_page(hwnd);
+    if (singbox >= 0 && steps[singbox].answer) installing = singbox_install_start(hwnd);
+    /* One download at a time: AmneziaWG follows sing-box when both are wanted. */
+    if (awg >= 0 && steps[awg].answer) {
+        if (installing) g_awg_after_singbox = 1;
+        else awg_install_start(hwnd, 0);
+    }
 }
 
 static int active_is_awg(void)
@@ -412,7 +509,7 @@ int vpn_refresh(void)
     int lost = now && active_is_awg() && !awgsvc_running();
 
     if (now == g_vpn_on && lost == g_awg_lost) return 0;
-    if (g_vpn_on && !now) pacproc_proxy_clear();
+    if (g_vpn_on && !now) pacproc_vpn_off();
     g_vpn_on   = now;
     g_awg_lost = lost;
     return 1;
@@ -586,7 +683,7 @@ static int vpn_down(long_job *j, wchar_t *msg, size_t cap)
 
     job_stage(j, L"Выключение VPN…");
     ok = singbox_stop(msg, cap);
-    pacproc_proxy_clear();
+    pacproc_vpn_off();
     if (awgsvc_running()) job_stage(j, L"Выключение туннеля AmneziaWG…");
     if (!awgsvc_stop(awg_msg, 200) && msg && !msg[0]) StringCchCopyW(msg, cap, awg_msg);
     return ok;
@@ -755,6 +852,8 @@ static long_job *vpn_job(HWND hwnd, job_work work, int target)
     v->in.log_level     = settings_log_levels[g_set.log_level];
     v->in.stack         = settings_stacks[g_set.stack];
     v->in.dns_host      = settings_dns[g_set.dns].host;
+    v->in.dns_type      = settings_dns[g_set.dns].type;
+    v->in.dns_path      = settings_dns[g_set.dns].path;
     v->in.store         = &v->store;
 
     {   /* Either profile of a switch may be AmneziaWG: always ready. */

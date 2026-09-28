@@ -1,6 +1,7 @@
 #define FD_SETSIZE 1024
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include "pacloop.h"
 #include "pacbridge.h"
 #include "pacdns.h"
 #include "pacstatus.h"
@@ -346,8 +347,11 @@ static void relay_tcp(SOCKET a, SOCKET b, LONG gen)
         fd_set f;
         struct timeval tv = { 1, 0 };
         int i;
+        pacloop_state ready;
         FD_ZERO(&f); if (a_open) FD_SET(a, &f); if (b_open) FD_SET(b, &f);
-        if (select(0, &f, NULL, NULL, &tv) <= 0) {
+        ready = pacloop_select(select(0, &f, NULL, NULL, &tv));
+        if (ready == PACLOOP_ERROR) return;
+        if (ready == PACLOOP_IDLE) {
             if ((!a_open || !b_open) && half_closed &&
                 GetTickCount64() - half_closed >= 60000) return;
             continue;
@@ -408,7 +412,11 @@ static void relay_udp(SOCKET control, LONG gen)
         struct timeval tv = { 1, 0 };
         FD_ZERO(&f); FD_SET(control, &f); FD_SET(incoming, &f);
         for (i = 0; i < 512; i++) if (peers[i].data != INVALID_SOCKET) FD_SET(peers[i].data, &f);
-        if (select(0, &f, NULL, NULL, &tv) <= 0) continue;
+        {
+            pacloop_state ready = pacloop_select(select(0, &f, NULL, NULL, &tv));
+            if (ready == PACLOOP_ERROR) break;
+            if (ready == PACLOOP_IDLE) continue;
+        }
         if (FD_ISSET(control, &f)) break;
         if (FD_ISSET(incoming, &f)) {
             struct sockaddr_in from;

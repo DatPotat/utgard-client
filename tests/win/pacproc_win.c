@@ -12,12 +12,12 @@ int main(void)
     STARTUPINFOW startup;
     PROCESS_INFORMATION child;
     HANDLE helper = NULL;
-    wchar_t command[] = L"C:\\Windows\\System32\\ping.exe -n 30 127.0.0.1";
+    wchar_t command[MAX_PATH + 32], system_dir[MAX_PATH];
     pac_store store;
     ZeroMemory(&store, sizeof store);
     store.count = 1;
     store.items[0].enabled = 1;
-    wcscpy(store.items[0].source, L"C:\\rules\\qa.pac");
+    wcscpy(store.items[0].source, L"rules\\qa.pac");
     store.items[0].text = "function FindProxyForURL(url, host) { return 'DIRECT'; }";
     ZeroMemory(&input, sizeof input);
     if (!pacproc_prepare(&process, &input, &store, error, 512)) {
@@ -36,6 +36,12 @@ int main(void)
                          &helper, PROCESS_TERMINATE | SYNCHRONIZE, FALSE, 0)) {
         pacproc_cancel(&process);
         return 3;
+    }
+    /* A stand-in for sing-box: any long-lived process, found through the
+       system directory rather than a fixed path. */
+    if (!GetSystemDirectoryW(system_dir, MAX_PATH) ||
+        swprintf(command, MAX_PATH + 32, L"\"%ls\\ping.exe\" -n 30 127.0.0.1", system_dir) < 0) {
+        CloseHandle(helper); pacproc_cancel(&process); return 4;
     }
     ZeroMemory(&startup, sizeof startup); startup.cb = sizeof startup;
     ZeroMemory(&child, sizeof child);
@@ -59,6 +65,6 @@ int main(void)
     puts("PAC helper job: helper crash stopped attached process");
     CloseHandle(child.hProcess);
     CloseHandle(helper);
-    pacproc_proxy_clear();
+    pacproc_vpn_off();
     return 0;
 }

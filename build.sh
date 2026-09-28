@@ -13,8 +13,9 @@
 #   debug         keep symbols for gdb
 #   clean         remove the build and output folders
 #
-# Output: bin/x64/ and bin/arm64/, each a complete product folder -
-# utgard.exe, utgard-pac-helper.exe and licenses/ - ready to be packed.
+# Output: release/utgard-client-<version>-windows-<arch>/, one complete
+# product folder per architecture - utgard.exe, bin/utgard-pac-helper.exe
+# and licenses/ - ready to be packed. The folder is rebuilt from scratch.
 # CC and WINDRES may be set in the environment to override detection
 # (only when building a single ARCH).
 
@@ -23,9 +24,9 @@ set -e
 # ---- what every architecture shares ---------------------------------
 
 SRC="$(ls src/core/*.c src/win/*.c src/ui/*.c | sort | tr '\n' ' ')vendor/parson/parson.c vendor/puff/puff.c"
-HELPER_SRC="src/helper/pac_helper.c src/core/pacguard.c src/core/paclogic.c src/core/pacrecord.c src/core/pacudp.c src/win/pac.c src/win/pacbridge.c src/win/pacdns.c src/win/pacstatus.c"
+HELPER_SRC="src/helper/pac_helper.c src/core/pacguard.c src/core/pacloop.c src/core/paclogic.c src/core/pacrecord.c src/core/pacudp.c src/win/pac.c src/win/pacbridge.c src/win/pacdns.c src/win/pacstatus.c"
 RC="res/utgard.rc"
-NEED="src/version.h src/helper/pac_helper.c vendor/puff/puff.h $RC res/utgard.manifest.in res/pac-helper.rc res/pac-helper.manifest.in res/utgard.ico res/utgard-tray-off.ico res/utgard-tray-on.ico licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt"
+NEED="src/version.h src/helper/pac_helper.c vendor/puff/puff.h $RC res/utgard.manifest.in res/pac-helper.rc res/pac-helper.manifest.in res/versioninfo.rc res/utgard.ico res/utgard-tray-off.ico res/utgard-tray-on.ico licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt"
 
 MISSING=""
 for f in $SRC $NEED; do
@@ -72,10 +73,10 @@ build_arch() {
         x64)   TRIPLE=x86_64-w64-mingw32 ;;
         arm64) TRIPLE=aarch64-w64-mingw32 ;;
     esac
-    BIN="bin/$ARCH"
+    BIN="release/utgard-client-$VERSION-windows-$ARCH"
     BUILD="build/$ARCH"
     OUT="$BIN/utgard.exe"
-    HELPER_OUT="$BIN/utgard-pac-helper.exe"
+    HELPER_OUT="$BIN/bin/utgard-pac-helper.exe"
 
     if [ "$2" = "clean" ]; then
         rm -rf "$BUILD" "$BIN"
@@ -118,7 +119,8 @@ build_arch() {
             exit 1 ;;
     esac
 
-    mkdir -p "$BUILD" "$BIN"
+    rm -rf "$BIN"
+    mkdir -p "$BUILD" "$BIN/bin"
 
     # The version string can lie about what the toolchain supports; a wide
     # entry point is what actually breaks on MinGW.org, so test exactly that.
@@ -148,6 +150,8 @@ PROBE
     # sits in the build folder, found first through --include-dir.
     sed "s/@VERSION4@/$VERSION.0/" res/utgard.manifest.in > "$BUILD/utgard.manifest"
     sed "s/@VERSION4@/$VERSION.0/" res/pac-helper.manifest.in > "$BUILD/pac-helper.manifest"
+    printf '#define UTGARD_VER_NUM %s,0\n#define UTGARD_VER_STR "%s"\n' \
+        "$(echo "$VERSION" | tr . ,)" "$VERSION" > "$BUILD/version-info.h"
     "$WINDRES" -J rc --include-dir="$BUILD" --include-dir=res "$RC" -O coff -o "$BUILD/utgard.res"
     "$WINDRES" -J rc --include-dir="$BUILD" --include-dir=res res/pac-helper.rc -O coff -o "$BUILD/pac-helper.res"
     # shellcheck disable=SC2086

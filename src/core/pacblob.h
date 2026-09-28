@@ -12,6 +12,5 @@ size_t pacblob_pack(const char *script, size_t script_length,
 int pacblob_unpack(const unsigned char *blob, size_t blob_length,
                    const char *script, size_t script_length,
                    uint16_t *source, size_t source_cap, size_t *source_units);
-int pacblob_store_version_supported(int version);
 
 #endif

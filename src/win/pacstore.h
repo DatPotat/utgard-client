@@ -6,7 +6,6 @@
 
 typedef struct {
     int enabled;
-    int via_vpn;
     wchar_t source[2048];
     char *text;
 } pac_item;

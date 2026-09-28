@@ -40,6 +40,19 @@ int  ask_is_hot(HWND button);
 void ask_edit_center(HWND edit);
 
 
+/* One themed window walking through questions in order, one per tab: each
+   answer moves to the next tab. Closing the window or Esc answers "no" to
+   the current question and the ones after it. answer is 1 for yes, 0 for no. */
+typedef struct {
+    const wchar_t *tab;    /* short name on the tab strip */
+    const wchar_t *text;   /* the question; \n breaks lines */
+    const wchar_t *yes;    /* primary button */
+    const wchar_t *no;     /* secondary button */
+    int            answer;
+} ask_step;
+#define ASK_STEPS_MAX 4
+void ask_steps(HWND owner, const wchar_t *title, ask_step *steps, int count);
+
 /* Modal single-field prompt. Returns 1 when the user accepted a non-empty
    value, 0 on cancel or an empty field. */
 int ask_string(HWND owner, const wchar_t *title, const wchar_t *hint,

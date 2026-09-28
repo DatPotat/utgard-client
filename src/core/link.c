@@ -817,7 +817,7 @@ static int keepalive_parse(link_profile *out, const char *val, char *err, size_t
     return 1;
 }
 
-int link_parse_wgconf(const char *text, size_t len, link_profile *out,
+static int link_parse_wgconf_raw(const char *text, size_t len, link_profile *out,
                       char *err, size_t errcap)
 {
     char        address[512] = "", endpoint[300] = "";
@@ -1212,7 +1212,7 @@ static int amnezia_payload(const char *text, link_profile *out, char *err, size_
     return oops(err, errcap, "не удалось распознать содержимое ссылки vpn://");
 }
 
-int link_parse_amnezia(const char *uri, link_profile *out, char *err, size_t errcap)
+static int link_parse_amnezia_raw(const char *uri, link_profile *out, char *err, size_t errcap)
 {
     const char    *body;
     size_t         len;
@@ -1323,7 +1323,7 @@ static int looks_like_bare_key(const char *s)
     }
     return n >= 64;
 }
-int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
+static int link_parse_raw(const char *uri, link_profile *out, char *err, size_t errcap)
 {
     const char *body, *frag, *query, *at, *hostpart;
     size_t      len, qlen, bodylen;
@@ -1583,6 +1583,65 @@ static int looks_like_links(const char *s, size_t len)
         if (i + 9 < len && strncmp(s + i, "hysteria2", 9) == 0) return 1;
     }
     return 0;
+}
+
+
+/* ---- UTF-8 of the parsed fields ----------------------------------------
+   parson refuses to write a string that is not well-formed UTF-8, and the
+   generator would then silently lose the field (a password, a path) and
+   sing-box fail far from the cause. So every value is checked here, where the
+   user can still be told which link is wrong. The name is exempt: the
+   generator cuts it to valid UTF-8 itself. */
+static int utf8_ok(const char *s)
+{
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p) {
+        unsigned long cp;
+        int n, i;
+        if (p[0] < 0x80) { p++; continue; }
+        if ((p[0] & 0xE0) == 0xC0)      { n = 1; cp = p[0] & 0x1F; }
+        else if ((p[0] & 0xF0) == 0xE0) { n = 2; cp = p[0] & 0x0F; }
+        else if ((p[0] & 0xF8) == 0xF0) { n = 3; cp = p[0] & 0x07; }
+        else return 0;
+        for (i = 1; i <= n; i++) {
+            if ((p[i] & 0xC0) != 0x80) return 0;
+            cp = (cp << 6) | (p[i] & 0x3F);
+        }
+        if ((n == 1 && cp < 0x80) || (n == 2 && cp < 0x800) || (n == 3 && cp < 0x10000) ||
+            cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return 0;
+        p += n + 1;
+    }
+    return 1;
+}
+
+static int fields_utf8(const link_profile *p, char *err, size_t errcap)
+{
+    const char *fields[] = { p->server, p->uuid, p->flow, p->password, p->method, p->sni,
+                             p->fingerprint, p->public_key, p->short_id, p->obfs,
+                             p->obfs_password, p->transport, p->path, p->host,
+                             p->service_name, p->alpn, p->wg_private_key, p->wg_peer_key,
+                             p->wg_psk, p->wg_address, p->wg_reserved, p->awg };
+    size_t i;
+    for (i = 0; i < sizeof fields / sizeof fields[0]; i++)
+        if (!utf8_ok(fields[i]))
+            return oops(err, errcap, "В ссылке есть значение в неверной кодировке (не UTF-8)");
+    return 1;
+}
+
+int link_parse_wgconf(const char *text, size_t len, link_profile *out,
+                      char *err, size_t errcap)
+{
+    return link_parse_wgconf_raw(text, len, out, err, errcap) && fields_utf8(out, err, errcap);
+}
+
+int link_parse_amnezia(const char *uri, link_profile *out, char *err, size_t errcap)
+{
+    return link_parse_amnezia_raw(uri, out, err, errcap) && fields_utf8(out, err, errcap);
+}
+
+int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
+{
+    return link_parse_raw(uri, out, err, errcap) && fields_utf8(out, err, errcap);
 }
 
 int link_parse_subscription(const char *body, size_t len,

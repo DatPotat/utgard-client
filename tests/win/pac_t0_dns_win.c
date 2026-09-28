@@ -122,6 +122,7 @@ int main(int argc, char **argv)
     WaitForMultipleObjects(3,threads,TRUE,9000);
     printf("T0 DNS UDP/TCP=%d server-a=%ld server-b=%ld final=%ld\n",ok,a.hits,b.hits,final.hits);
     for (int i=0;i<3;i++) CloseHandle(threads[i]);
-    if (ok) remove("t0-dns.json"); WSACleanup();
+    if (ok) remove("t0-dns.json");
+    WSACleanup();
     return ok && a.hits==1 && b.hits==1 && final.hits==0 ? 0 : 1;
 }

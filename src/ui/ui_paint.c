@@ -105,35 +105,56 @@ static void paint_pac(HDC dc, const RECT *c)
 {
     int top = TABS_H;
     int w = c->right - PAD * 2;
-    wchar_t status[320];
+    int problems = g_vpn_on && g_pac_status_valid &&
+                   (g_pac_status.evaluation_errors || g_pac_status.worker_cap_hits ||
+                    g_pac_status.dns_cap_hits || g_pac_status.udp_evictions);
+    wchar_t status[160], detail[320];
     text_at(dc, PAD, top + S(14), w - S(140), S(24),
             L"PAC-файлы", CLR_TEXT, g_font_big, DT_LEFT);
-    text_at(dc, PAD, top + S(40), w, S(22),
-            L"Активные правила объединяются: прокси в любом PAC означает выбранный VPN-профиль.",
-            CLR_MUTED, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
-    if (g_vpn_on && g_pac_status_valid && (g_pac_status.evaluation_errors ||
-        g_pac_status.worker_cap_hits || g_pac_status.dns_cap_hits ||
-        g_pac_status.udp_evictions))
-        StringCchPrintfW(status, 320,
-            L"PAC: ошибок %llu (Windows %lu) · лимиты TCP %llu, DNS %llu, UDP %llu · листов %u",
-            (unsigned long long)g_pac_status.evaluation_errors,
-            (unsigned long)g_pac_status.last_error,
-            (unsigned long long)g_pac_status.worker_cap_hits,
-            (unsigned long long)g_pac_status.dns_cap_hits,
-            (unsigned long long)g_pac_status.udp_evictions,
-            g_pac_status.active_count);
-    else if (g_vpn_on && g_pac_status_valid)
-        StringCchPrintfW(status, 320, L"Используется PAC-листов: %u",
-                         g_pac_status.active_count);
+    /* First line: the state, short enough to fit beside the title. */
+    if (g_vpn_on && g_pac_status_valid)
+        StringCchPrintfW(status, 160, L"Используется PAC: %u", g_pac_status.active_count);
     else if (g_vpn_on)
-        StringCchPrintfW(status, 320, L"Включено PAC-листов: %d · PAC не используется",
-                         g_pac_count);
+        StringCchPrintfW(status, 160, L"Включено PAC: %d · не используются", g_pac_count);
     else
-        StringCchPrintfW(status, 320, L"Включено PAC-листов: %d · VPN выключен",
-                         g_pac_count);
-    text_at(dc, PAD + S(175), top + S(14), w - S(315), S(24), status,
-            (g_vpn_on && g_pac_status_valid) ? CLR_OK : CLR_MUTED, g_font_small,
-            DT_RIGHT | DT_END_ELLIPSIS);
+        StringCchPrintfW(status, 160, L"Включено PAC: %d · VPN выключен", g_pac_count);
+    {
+        /* From after the title to just before the help link, wherever
+           layout() put it. */
+        RECT link;
+        int right = PAD + w;
+        GetWindowRect(g_pac_help, &link);
+        MapWindowPoints(NULL, GetParent(g_pac_help), (POINT *)&link, 2);
+        if (link.left > PAD) right = link.left - S(12);
+        text_at(dc, PAD + S(120), top + S(14), right - PAD - S(120), S(24), status,
+                (g_vpn_on && g_pac_status_valid) ? CLR_OK : CLR_MUTED, g_font_small,
+                DT_RIGHT | DT_END_ELLIPSIS);
+    }
+    /* Second line, full width: the counters when something went wrong,
+       otherwise the one-line summary of how PAC works. */
+    if (problems) {
+        wchar_t last[48] = L"";
+        if (g_pac_status.evaluation_errors) {
+            if (g_pac_status.last_error == ERROR_TIMEOUT)
+                StringCchCopyW(last, 48, L" (последняя — тайм-аут 3 с)");
+            else
+                StringCchPrintfW(last, 48, L" (последняя — код %lu)", (unsigned long)g_pac_status.last_error);
+        }
+        StringCchPrintfW(detail, 320, L"Ошибок вычисления PAC: %llu%s",
+                         (unsigned long long)g_pac_status.evaluation_errors, last);
+        if (g_pac_status.worker_cap_hits || g_pac_status.dns_cap_hits || g_pac_status.udp_evictions) {
+            wchar_t caps[96];
+            StringCchPrintfW(caps, 96, L" · лимиты: TCP %llu, DNS %llu, UDP %llu",
+                             (unsigned long long)g_pac_status.worker_cap_hits,
+                             (unsigned long long)g_pac_status.dns_cap_hits,
+                             (unsigned long long)g_pac_status.udp_evictions);
+            StringCchCatW(detail, 320, caps);
+        }
+    } else {
+        StringCchCopyW(detail, 320, L"Если хоть один PAC отвечает прокси, соединение идёт через VPN.");
+    }
+    text_at(dc, PAD, top + S(40), w, S(22), detail, problems ? CLR_WARN : CLR_MUTED,
+            g_font_small, DT_LEFT | DT_END_ELLIPSIS);
     fill(dc, 0, top + S(68), c->right, S(1), g_brush_line);
 }
 
@@ -214,7 +235,7 @@ static void paint_settings(HDC dc, const RECT *c)
     text_at(dc, PAD, top + S(136), S(120), S(28), L"Журнал",  CLR_TEXT, g_font, DT_LEFT);
     text_at(dc, PAD, top + S(178), S(120), S(28), L"Стек",    CLR_TEXT, g_font, DT_LEFT);
     text_at(dc, PAD, top + S(220), S(120), S(28), L"DNS",     CLR_TEXT, g_font, DT_LEFT);
-    text_at(dc, PAD, top + S(262), S(120), S(28), L"Подписка", CLR_TEXT, g_font, DT_LEFT);
+    text_at(dc, PAD, top + S(262), S(120), S(28), L"Подписка и PAC", CLR_TEXT, g_font, DT_LEFT | DT_END_ELLIPSIS);
 
     text_at(dc, PAD + S(238), top + S(94), S(80), S(28), L"Что это?",
             CLR_ACCENT, g_font_small, DT_LEFT);
