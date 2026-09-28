@@ -16,7 +16,7 @@ int tabs_top(void)
 {
     int routing = g_page == PAGE_APPS || g_page == PAGE_PAC || g_page == PAGE_PICK ||
                   g_page == PAGE_EDIT || (g_page == PAGE_HOSTS && g_hosts_mode == HOSTS_VPN);
-    return routing ? S(64) : S(8);
+    return routing ? S(120) : S(8);
 }
 
 /* Places a control in page coordinates; handed to other modules. */
@@ -157,7 +157,7 @@ static void layout_settings(HWND hwnd, const RECT *rc)
     ShowWindow(g_set_save, SW_HIDE);
 
     if (g_tip) {
-        /* "Что это?" beside the MTU, stack and DNS labels. */
+        /* The info icon beside the MTU, stack and DNS labels. */
         TTTOOLINFOW ti;
         int         ys[3], xs[3], shown[3];
         ZeroMemory(&ti, sizeof ti);
@@ -171,8 +171,8 @@ static void layout_settings(HWND hwnd, const RECT *rc)
             ti.uId = (UINT_PTR)(4 + k);
             SetRectEmpty(&ti.rect);
             if (shown[k]) {
-                ti.rect.left = xs[k] + g.colw - S(96); ti.rect.top = ys[k];
-                ti.rect.right = ti.rect.left + S(80); ti.rect.bottom = ys[k] + S(22);
+                ti.rect.left = xs[k] + g.colw - S(16) - S(24); ti.rect.top = ys[k] - S(2);
+                ti.rect.right = ti.rect.left + S(30); ti.rect.bottom = ys[k] + S(26);
             }
             tip_rect(&ti);
         }
@@ -287,7 +287,7 @@ static void layout_routing_tabs(const RECT *rc)
     tabs[0] = g_tab_sites; tabs[1] = g_tab_apps; tabs[2] = g_tab_pac;
     for (i = 0; i < 3; i++) {
         int w = caption_width(tabs[i]) + S(24);
-        MoveWindow(tabs[i], x, S(16), w, S(40), TRUE);
+        MoveWindow(tabs[i], x, S(72), w, S(40), TRUE);
         x += w + S(8);
         ShowWindow(tabs[i], show);
         InvalidateRect(tabs[i], NULL, FALSE);

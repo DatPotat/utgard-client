@@ -249,7 +249,7 @@ void paint_sidebar(HDC dc, const RECT *client)
         SelectObject(dc, old);
         text_at(dc, S(28), S(24), sw - S(40), S(24), L"Utgard", CLR_TEXT, g_font_bold, DT_LEFT);
         text_at(dc, S(28) + sz.cx + S(6), S(24) + S(2), sw - S(40) - sz.cx, S(24),
-                UTGARD_VERSION_W, CLR_MUTED, g_font_small, DT_LEFT);
+                UTGARD_VERSION_W, CLR_MUTED, g_font_meta, DT_LEFT);
     }
     fill(dc, S(16), client->bottom - S(72), sw - S(32), S(1), g_brush_line);
     {

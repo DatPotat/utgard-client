@@ -16,7 +16,7 @@ int    g_dpi  = USER_DEFAULT_SCREEN_DPI;
 int    g_page = PAGE_UTGARD;
 
 HFONT  g_font, g_font_big, g_font_small;
-HFONT  g_font_bold, g_font_small_bold, g_font_title, g_font_deco;
+HFONT  g_font_bold, g_font_small_bold, g_font_title, g_font_deco, g_font_meta;
 HWND   g_set_adv;
 HWND   g_sel[SEL_COUNT];
 int    g_set_adv_open;
@@ -894,8 +894,9 @@ static LRESULT on_command(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case ID_APPS_MANUAL: ed_open_new(hwnd); return 0;
 
     case ID_PROFILES:
+        /* One click chooses the server, a double click switches to it. */
         if (HIWORD(wp) == LBN_DBLCLK)         act_profile_activate(hwnd);
-        else if (HIWORD(wp) == LBN_SELCHANGE) layout(hwnd);
+        else if (HIWORD(wp) == LBN_SELCHANGE) act_profile_pick(hwnd);
         return 0;
     case ID_ZAP_START:  act_start(hwnd, NULL); return 0;
     case ID_ZAP_STOP:   act_stop(hwnd);       return 0;

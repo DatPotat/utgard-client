@@ -100,7 +100,9 @@ static void paint_servers(HDC dc, const RECT *c)
         if (icmp_silent)
             StringCchCopyW(hint, 160, L"«Нет ответа» не значит, что сервер не работает: он может не отвечать на проверку задержки.");
         else
-            StringCchPrintfW(hint, 160, L"%d %s · двойной щелчок — подключить",
+            StringCchPrintfW(hint, 160, g_vpn_on
+                                 ? L"%d %s · двойной щелчок — переключиться"
+                                 : L"%d %s · щелчок — выбрать, двойной щелчок — подключиться",
                              g_prof.count, plural_ru(g_prof.count, L"сервер", L"сервера", L"серверов"));
     } else {
         StringCchCopyW(hint, 160, L"Пока пусто: добавьте ссылку на сервер или подписку.");
@@ -258,7 +260,7 @@ static void paint_settings(HDC dc, const RECT *c)
     group_label(dc, g.lx, g.conn, g.colw, L"Подключение");
     card(dc, g.lx, g.conn + S(26), g.colw, S(144));
     text_at(dc, g.lx + S(16), g.conn + S(26) + S(8), g.colw, S(22), L"DNS для сайтов через VPN", CLR_TEXT, g_font, DT_LEFT);
-    text_at(dc, g.lx + g.colw - S(96), g.conn + S(26) + S(8), S(80), S(22), L"Что это?", CLR_ACCENT, g_font_small, DT_RIGHT);
+    gfx_icon(dc, ICON_INFO, g.lx + g.colw - S(16) - S(18), g.conn + S(26) + S(10), S(18), CLR_ACCENT);
     fill(dc, g.lx + S(1), g.conn + S(26) + S(72), g.colw - S(2), S(1), g_brush_line);
     text_at(dc, g.lx + S(16), g.conn + S(26) + S(80), g.colw, S(22), L"Обновлять подписку и PAC", CLR_TEXT, g_font, DT_LEFT);
 
@@ -277,12 +279,12 @@ static void paint_settings(HDC dc, const RECT *c)
         RECT f = { g.rx + S(16) - S(2), y + S(34) - S(2), g.rx + S(16) + S(100) + S(2), y + S(34) + S(28) + S(2) };
         rounded_r(dc, &f, CLR_SURFACE, CLR_BORDER, S(6));
     }
-    text_at(dc, g.rx + g.colw - S(96), y + S(8), S(80), S(22), L"Что это?", CLR_ACCENT, g_font_small, DT_RIGHT);
+    gfx_icon(dc, ICON_INFO, g.rx + g.colw - S(16) - S(18), y + S(10), S(18), CLR_ACCENT);
     fill(dc, g.rx + S(1), y + S(72), g.colw - S(2), S(1), g_brush_line);
     text_at(dc, g.rx + S(16), y + S(80), g.colw, S(22), L"Уровень журнала", CLR_TEXT, g_font, DT_LEFT);
     fill(dc, g.rx + S(1), y + S(144), g.colw - S(2), S(1), g_brush_line);
     text_at(dc, g.rx + S(16), y + S(152), g.colw, S(22), L"Сетевой стек", CLR_TEXT, g_font, DT_LEFT);
-    text_at(dc, g.rx + g.colw - S(96), y + S(152), S(80), S(22), L"Что это?", CLR_ACCENT, g_font_small, DT_RIGHT);
+    gfx_icon(dc, ICON_INFO, g.rx + g.colw - S(16) - S(18), y + S(154), S(18), CLR_ACCENT);
     fill(dc, g.rx + S(1), y + S(216), g.colw - S(2), S(1), g_brush_line);
 }
 
@@ -314,7 +316,7 @@ static void paint_zapret(HDC dc, const RECT *c)
                      g_zap.version[0] ? L"версия " : L"версия не определена",
                      g_zap.version, g_zap.strategy_count,
                      plural_ru(g_zap.strategy_count, L"стратегия", L"стратегии", L"стратегий"));
-    text_at(dc, PAD, S(60), w - S(200), S(20), line, CLR_MUTED, g_font_small, DT_LEFT | DT_PATH_ELLIPSIS);
+    text_at(dc, PAD, S(60), w - S(200), S(20), line, CLR_MUTED, g_font_meta, DT_LEFT | DT_PATH_ELLIPSIS);
 
     if (g_zap_dirty) {
         r.left = PAD; r.top = g.banner; r.right = c->right - PAD; r.bottom = g.banner + S(48);
@@ -411,8 +413,11 @@ void on_paint(HWND hwnd)
     else if (g_page == PAGE_EDIT)    paint_edit(dc, &c);
     else if (g_page == PAGE_SETTINGS) paint_settings(dc, &c);
     else                             paint_zapret(dc, &c);
-    if (tabs_top() > S(8))
-        fill(dc, PAD, S(56), c.right - PAD * 2, S(1), g_brush_line);
+    if (tabs_top() > S(8)) {
+        /* The routing pages: the section title, as on Servers, over the tabs. */
+        text_at(dc, PAD, S(28), c.right - PAD * 2, S(32), L"Маршрутизация", CLR_TEXT, title_font(), DT_LEFT);
+        fill(dc, PAD, S(112), c.right - PAD * 2, S(1), g_brush_line);
+    }
     if (footer) {
         fill(dc, 0, c.bottom - FOOTER_H, c.right, FOOTER_H, g_brush_footer);
         fill(dc, 0, c.bottom - FOOTER_H, c.right, S(1), g_brush_line);
@@ -511,10 +516,10 @@ void draw_profile(const DRAWITEMSTRUCT *d)
     text_at(d->hDC, r.left + S(16), r.top, xp - S(32), r.bottom - r.top, text,
             locked ? CLR_MUTED : CLR_TEXT, active ? g_font_bold : g_font, DT_LEFT | DT_END_ELLIPSIS);
     text_at(d->hDC, r.left + xp, r.top, xh - xp - S(16), r.bottom - r.top,
-            proto_label(&e->link), CLR_MUTED, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
+            proto_label(&e->link), CLR_MUTED, g_font_meta, DT_LEFT | DT_END_ELLIPSIS);
     to_wide(e->link.server, text, 288);
     text_at(d->hDC, r.left + xh, r.top, xg - xh - S(16), r.bottom - r.top,
-            text, CLR_MUTED, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
+            text, CLR_MUTED, g_font_meta, DT_LEFT | DT_END_ELLIPSIS);
     {
         int      ms = g_ping[d->itemID];
         wchar_t  lat[24];
@@ -636,7 +641,7 @@ void draw_pick_row(const DRAWITEMSTRUCT *d)
     }
     text_at(d->hDC, r.left + S(34), r.top + S(20), r.right - r.left - S(80), S(16),
             readable ? p->path : L"расположение недоступно", CLR_MUTED,
-            g_font_small, DT_LEFT | DT_PATH_ELLIPSIS);
+            g_font_meta, DT_LEFT | DT_PATH_ELLIPSIS);
 
     if (readable) {
         RECT b;

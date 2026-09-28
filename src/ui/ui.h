@@ -286,7 +286,7 @@ typedef struct {
 extern int g_dpi;
 extern int g_page;
 extern HFONT g_font, g_font_big, g_font_small;
-extern HFONT g_font_bold, g_font_small_bold, g_font_title, g_font_deco;
+extern HFONT g_font_bold, g_font_small_bold, g_font_title, g_font_deco, g_font_meta;
 void  fonts_load_embedded(void);
 HFONT title_font(void);
 extern HWND g_nav[NAV_COUNT], g_row_server, g_tab_sites, g_tab_apps, g_tab_pac, g_set_theme;
@@ -516,6 +516,7 @@ extern int g_switch_pending;     /* profile a switch waits to run, -1 none */
 void act_profile_add(HWND hwnd);
 void act_profile_delete(HWND hwnd);
 void act_profile_activate(HWND hwnd);
+void act_profile_pick(HWND hwnd);
 
 /* ---- ui_lists.c ---- */
 
