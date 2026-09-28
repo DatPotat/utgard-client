@@ -45,8 +45,26 @@ int modal_box(HWND hwnd, const wchar_t *text, const wchar_t *title, UINT flags)
 {
     int r;
 
+    /* The client's own window, in the theme, instead of the system box:
+       the answers keep the MessageBox return values for the callers. */
     g_modal++;
-    r = MessageBoxW(hwnd, text, title, flags);
+    switch (flags & 0x0F) {
+    case MB_YESNO:
+        r = ask_message(hwnd, title, text, L"Да", L"Нет", NULL);
+        r = r == 1 ? IDYES : IDNO;
+        break;
+    case MB_YESNOCANCEL:
+        r = ask_message(hwnd, title, text, L"Да", L"Нет", L"Отмена");
+        r = r == 1 ? IDYES : r == 2 ? IDNO : IDCANCEL;
+        break;
+    case MB_OKCANCEL:
+        r = ask_message(hwnd, title, text, L"OK", L"Отмена", NULL);
+        r = r == 1 ? IDOK : IDCANCEL;
+        break;
+    default:
+        ask_message(hwnd, title, text, L"OK", NULL, NULL);
+        r = IDOK;
+    }
     g_modal--;
     if (!g_modal && g_upd_pending && IsWindowVisible(hwnd)) {
         g_upd_pending = 0;
@@ -113,4 +131,43 @@ void after_action(HWND hwnd)
 {
     status_refresh();
     layout(hwnd);
+}
+
+/* Russian noun after a number: 1 сайт, 3 сайта, 5 сайтов, 11 сайтов,
+   21 сайт. Kept in one place so a string catalogue can replace it. */
+const wchar_t *plural_ru(long n, const wchar_t *one, const wchar_t *few, const wchar_t *many)
+{
+    long a = n < 0 ? -n : n, d = a % 10, h = a % 100;
+    if (d == 1 && h != 11) return one;
+    if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return few;
+    return many;
+}
+
+/* One file from the Explorer open dialog: a title, one filter (plus "all
+   files"), the chosen path out. 1 when a file was chosen. */
+int pick_file(HWND hwnd, const wchar_t *title, const wchar_t *filter_name,
+              const wchar_t *filter_spec, wchar_t *path, size_t cap)
+{
+    IFileOpenDialog *dialog = NULL;
+    IShellItem *item = NULL;
+    PWSTR selected = NULL;
+    COMDLG_FILTERSPEC types[2];
+    int ok = 0;
+    types[0].pszName = filter_name; types[0].pszSpec = filter_spec;
+    types[1].pszName = L"Все файлы"; types[1].pszSpec = L"*.*";
+    if (FAILED(CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER,
+                                &IID_IFileOpenDialog, (void **)&dialog))) return 0;
+    IFileOpenDialog_SetOptions(dialog, FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR);
+    IFileOpenDialog_SetFileTypes(dialog, 2, types);
+    IFileOpenDialog_SetTitle(dialog, title);
+    g_modal++;
+    if (SUCCEEDED(IFileOpenDialog_Show(dialog, hwnd)) &&
+        SUCCEEDED(IFileOpenDialog_GetResult(dialog, &item)) &&
+        SUCCEEDED(IShellItem_GetDisplayName(item, SIGDN_FILESYSPATH, &selected)))
+        ok = SUCCEEDED(StringCchCopyW(path, cap, selected));
+    g_modal--;
+    CoTaskMemFree(selected);
+    if (item) IShellItem_Release(item);
+    IFileOpenDialog_Release(dialog);
+    return ok;
 }

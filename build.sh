@@ -26,7 +26,7 @@ set -e
 SRC="$(ls src/core/*.c src/win/*.c src/ui/*.c | sort | tr '\n' ' ')vendor/parson/parson.c vendor/puff/puff.c"
 HELPER_SRC="src/helper/pac_helper.c src/core/pacguard.c src/core/pacloop.c src/core/paclogic.c src/core/pacrecord.c src/core/pacudp.c src/win/pac.c src/win/pacbridge.c src/win/pacdns.c src/win/pacstatus.c"
 RC="res/utgard.rc"
-NEED="src/version.h src/helper/pac_helper.c vendor/puff/puff.h $RC res/utgard.manifest.in res/pac-helper.rc res/pac-helper.manifest.in res/versioninfo.rc res/utgard.ico res/utgard-tray-off.ico res/utgard-tray-on.ico licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt"
+NEED="src/version.h src/helper/pac_helper.c vendor/puff/puff.h $RC res/utgard.manifest.in res/pac-helper.rc res/pac-helper.manifest.in res/versioninfo.rc res/utgard.ico res/utgard-tray-off.ico res/utgard-tray-on.ico res/fonts/RuslanDisplay-Regular.ttf licenses/RUSLAN-DISPLAY-OFL.txt licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt"
 
 MISSING=""
 for f in $SRC $NEED; do
@@ -204,7 +204,7 @@ PROBE
 
     # The exe carries Parson and puff, whose notices must travel with it.
     mkdir -p "$BIN/licenses"
-    cp licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt "$BIN/licenses/"
+    cp licenses/UTGARD-MIT.txt licenses/PARSON-MIT.txt licenses/THIRD-PARTY-NOTICES.txt licenses/RUSLAN-DISPLAY-OFL.txt "$BIN/licenses/"
 
     echo "Собрано: $OUT (Utgard $VERSION)"
     echo "          $HELPER_OUT"

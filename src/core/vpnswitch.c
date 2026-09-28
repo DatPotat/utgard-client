@@ -20,24 +20,24 @@ int vpn_switch(const vpn_switch_ops *ops, wchar_t *msg, size_t cap)
     if (msg && cap) msg[0] = L'\0';
 
     if (!ops->prepare(ops->ctx, VPN_NEW, why, REASON_MAX)) {
-        explain(msg, cap, L"Профиль не переключён, VPN работает как прежде.", why, L"");
+        explain(msg, cap, L"Сервер не переключён, VPN работает как прежде.", why, L"");
         return 0;
     }
     if (!ops->prepare(ops->ctx, VPN_OLD, why, REASON_MAX)) {
-        explain(msg, cap, L"Профиль не переключён, VPN работает как прежде: не удалось подготовить "
-                       L"возврат к текущему профилю.", why, L"");
+        explain(msg, cap, L"Сервер не переключён, VPN работает как прежде: не удалось подготовить "
+                       L"возврат к текущему серверу.", why, L"");
         return 0;
     }
     if (!ops->down(ops->ctx, why, REASON_MAX)) {
-        explain(msg, cap, L"Профиль не переключён: не удалось остановить VPN.", why, L"");
+        explain(msg, cap, L"Сервер не переключён: не удалось остановить VPN.", why, L"");
         return 0;
     }
     if (ops->up(ops->ctx, VPN_NEW, why, REASON_MAX)) return 1;
 
     if (ops->up(ops->ctx, VPN_OLD, back, REASON_MAX))
-        explain(msg, cap, L"Новый профиль не запустился — возвращён прежний.", why, L"");
+        explain(msg, cap, L"Новый сервер не запустился — возвращён прежний.", why, L"");
     else
-        explain(msg, cap, L"Новый профиль не запустился, и вернуть прежний не удалось — VPN выключен.",
+        explain(msg, cap, L"Новый сервер не запустился, и вернуть прежний не удалось — VPN выключен.",
              why, back);
     return 0;
 }

@@ -9,6 +9,7 @@
 #include <strsafe.h>
 #include <uxtheme.h>
 #include <commctrl.h>
+#include <dwmapi.h>
 
 #define ID_EDIT   1001
 #define ID_OK     1002
@@ -28,6 +29,28 @@ static ask_metric_fn      g_scale;
 static HFONT              g_ask_font, g_ask_small;
 static HBRUSH             g_ask_bg, g_ask_surface, g_ask_line;
 static COLORREF           g_ask_text, g_ask_muted, g_ask_surface_color;
+static int                g_ask_dark;
+static COLORREF           g_ask_caption, g_ask_border;
+static ask_round_fn       g_round;
+
+void ask_configure_frame(int dark, COLORREF caption, COLORREF border, ask_round_fn round)
+{
+    g_ask_dark = dark;
+    g_ask_caption = caption;
+    g_ask_border = border;
+    g_round = round;
+}
+
+/* 20 and 35 are DWMWA_USE_IMMERSIVE_DARK_MODE and DWMWA_CAPTION_COLOR;
+   builds that do not know an attribute ignore it. */
+static void frame_theme(HWND hwnd)
+{
+    BOOL     dark = g_ask_dark;
+    COLORREF cap  = g_ask_caption;
+    DwmSetWindowAttribute(hwnd, 20, &dark, sizeof dark);
+    DwmSetWindowAttribute(hwnd, 35, &cap, sizeof cap);
+}
+
 
 void ask_configure(ask_draw_button_fn draw, ask_metric_fn scale,
                    HFONT font, HFONT small_font,
@@ -89,6 +112,12 @@ static LRESULT CALLBACK hover_proc(HWND h, UINT m, WPARAM w, LPARAM l,
         break;
     }
     return DefSubclassProc(h, m, w, l);
+}
+
+static void field_box(HDC dc, const RECT *r)
+{
+    if (g_round) g_round(dc, r, g_ask_surface_color, g_ask_border, S(10));
+    else FrameRect(dc, r, g_ask_line);
 }
 
 void ask_hover_attach(HWND button) { SetWindowSubclass(button, hover_proc, 1, 0); }
@@ -209,9 +238,11 @@ static LRESULT CALLBACK ask_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         st = (ask_state *)cs->lpCreateParams;
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)st);
 
+        frame_theme(hwnd);
+        /* The edit sits inside a rounded 40-pixel field, clear of its corners. */
         st->edit = CreateWindowExW(0, L"EDIT", L"",
                                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-                                   S(16), S(24) + st->hint_h + S(10), S(408), S(30), hwnd,
+                                   S(26), S(24) + st->hint_h + S(10) + S(4), S(388), S(32), hwnd,
                                    (HMENU)(INT_PTR)ID_EDIT, cs->hInstance, NULL);
         SendMessageW(st->edit, EM_SETLIMITTEXT, (WPARAM)(st->cap - 1), 0);
         SendMessageW(st->edit, WM_SETFONT, (WPARAM)g_ask_font, TRUE);
@@ -219,17 +250,17 @@ static LRESULT CALLBACK ask_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
         {
             HWND b;
-            int  by = S(24) + st->hint_h + S(10) + S(30) + S(16);
+            int  by = S(24) + st->hint_h + S(10) + S(40) + S(16);
             b = CreateWindowExW(0, L"BUTTON", L"Отмена",
                                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                S(250), by, S(84), S(30), hwnd,
+                                S(238), by, S(90), S(40), hwnd,
                                 (HMENU)(INT_PTR)ID_CANCEL, cs->hInstance, NULL);
             SetWindowLongPtrW(b, GWLP_USERDATA, ASK_BTN_SECONDARY);            ask_hover_attach(b);
             SendMessageW(b, WM_SETFONT, (WPARAM)g_ask_font, TRUE);
 
             b = CreateWindowExW(0, L"BUTTON", L"Добавить",
                                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                S(342), by, S(84), S(30), hwnd,
+                                S(336), by, S(90), S(40), hwnd,
                                 (HMENU)(INT_PTR)ID_OK, cs->hInstance, NULL);
             SetWindowLongPtrW(b, GWLP_USERDATA, ASK_BTN_PRIMARY);            ask_hover_attach(b);
             SendMessageW(b, WM_SETFONT, (WPARAM)g_ask_font, TRUE);
@@ -264,10 +295,9 @@ static LRESULT CALLBACK ask_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         SelectObject(dc, old);
 
-        /* Two pixels outside the 30-pixel field on every side. */
-        box.left = S(14); box.top = S(22) + (st ? st->hint_h : 0) + S(10);
-        box.right = c.right - S(14); box.bottom = box.top + S(34);
-        FrameRect(dc, &box, g_ask_line);
+        box.left = S(16); box.top = S(24) + (st ? st->hint_h : 0) + S(10);
+        box.right = c.right - S(16); box.bottom = box.top + S(40);
+        field_box(dc, &box);
 
         EndPaint(hwnd, &ps);
         return 0;
@@ -346,7 +376,7 @@ int ask_string(HWND owner, const wchar_t *title, const wchar_t *hint,
     register_class(inst);
 
     want.left = 0; want.top = 0; want.right = S(440);
-    want.bottom = S(24) + st.hint_h + S(10) + S(30) + S(16) + S(30) + S(16);
+    want.bottom = S(24) + st.hint_h + S(10) + S(40) + S(16) + S(40) + S(16);
     AdjustWindowRectExForDpi(&want, style, FALSE, 0, (UINT)S(96));
     GetWindowRect(owner, &o);
 
@@ -485,6 +515,7 @@ static LRESULT CALLBACK steps_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_CREATE: {
         CREATESTRUCTW *cs = (CREATESTRUCTW *)lp;
         st = (steps_state *)cs->lpCreateParams;
+        frame_theme(hwnd);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)st);
         st->no = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                                  0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_STEP_NO, cs->hInstance, NULL);
@@ -592,4 +623,133 @@ void ask_steps(HWND owner, const wchar_t *title, ask_step *steps, int count)
     EnableWindow(owner, TRUE);
     SetActiveWindow(owner);
     DestroyWindow(hwnd);
+}
+
+/* ---- messages ------------------------------------------------------------ */
+
+typedef struct {
+    const wchar_t *text;
+    int            text_h, done;
+} msg_state;
+
+#define ID_MSG_B1 1101
+
+static LRESULT CALLBACK msg_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    msg_state *st = (msg_state *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    switch (msg) {
+    case WM_CREATE: {
+        CREATESTRUCTW *cs = (CREATESTRUCTW *)lp;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)cs->lpCreateParams);
+        frame_theme(hwnd);
+        return 0;
+    }
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC         dc = BeginPaint(hwnd, &ps);
+        RECT        c, t;
+        HGDIOBJ     old;
+        GetClientRect(hwnd, &c);
+        FillRect(dc, &c, g_ask_bg);
+        old = SelectObject(dc, g_ask_font);
+        SetTextColor(dc, g_ask_text);
+        SetBkMode(dc, TRANSPARENT);
+        t.left = S(24); t.top = S(24); t.right = c.right - S(24); t.bottom = t.top + (st ? st->text_h : 0);
+        DrawTextW(dc, st ? st->text : L"", -1, &t, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
+        SelectObject(dc, old);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_DRAWITEM:
+        if (g_draw) g_draw((const DRAWITEMSTRUCT *)lp);
+        return TRUE;
+    case WM_COMMAND:
+        if (st && LOWORD(wp) >= ID_MSG_B1 && LOWORD(wp) < ID_MSG_B1 + 3) st->done = LOWORD(wp) - ID_MSG_B1 + 1;
+        return 0;
+    case WM_CLOSE:
+        if (st) st->done = -1;
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+int ask_message(HWND owner, const wchar_t *title, const wchar_t *text,
+                const wchar_t *b1, const wchar_t *b2, const wchar_t *b3)
+{
+    static int registered;
+    HINSTANCE  inst = (HINSTANCE)GetWindowLongPtrW(owner, GWLP_HINSTANCE);
+    const wchar_t *labels[3];
+    msg_state  st;
+    HWND       hwnd, buttons[3];
+    RECT       o, want;
+    MSG        m;
+    DWORD      style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
+    int        width = S(460), k, n = 0, x, by, bw[3];
+
+    labels[0] = b1; labels[1] = b2; labels[2] = b3;
+    for (k = 0; k < 3 && labels[k]; k++) n++;
+    if (!n) { labels[0] = L"OK"; n = 1; }
+    st.text = text ? text : L"";
+    st.done = 0;
+    {
+        HDC     dc  = GetDC(owner);
+        HGDIOBJ old = SelectObject(dc, g_ask_font);
+        RECT    t   = { 0, 0, width - S(48), 0 };
+        DrawTextW(dc, st.text, -1, &t, DT_CALCRECT | DT_WORDBREAK | DT_LEFT | DT_NOPREFIX);
+        st.text_h = t.bottom - t.top;
+        SelectObject(dc, g_ask_font);
+        for (k = 0; k < n; k++) {
+            SIZE sz = { 0, 0 };
+            GetTextExtentPoint32W(dc, labels[k], (int)wcslen(labels[k]), &sz);
+            bw[k] = sz.cx + S(40);
+            if (bw[k] < S(90)) bw[k] = S(90);
+        }
+        SelectObject(dc, old);
+        ReleaseDC(owner, dc);
+    }
+    if (!registered) {
+        WNDCLASSEXW wc;
+        ZeroMemory(&wc, sizeof wc);
+        wc.cbSize = sizeof wc; wc.lpfnWndProc = msg_proc; wc.hInstance = inst;
+        wc.hCursor = LoadCursorW(NULL, IDC_ARROW); wc.hbrBackground = g_ask_bg;
+        wc.lpszClassName = L"UtgardMsg";
+        RegisterClassExW(&wc);
+        registered = 1;
+    }
+    by = S(24) + st.text_h + S(24);
+    want.left = 0; want.top = 0; want.right = width; want.bottom = by + S(40) + S(20);
+    AdjustWindowRectExForDpi(&want, style, FALSE, 0, (UINT)S(96));
+    GetWindowRect(owner, &o);
+    hwnd = CreateWindowExW(WS_EX_DLGMODALFRAME, L"UtgardMsg", title ? title : L"Utgard", style,
+                           o.left + ((o.right - o.left) - (want.right - want.left)) / 2,
+                           o.top + ((o.bottom - o.top) - (want.bottom - want.top)) / 3,
+                           want.right - want.left, want.bottom - want.top, owner, NULL, inst, &st);
+    if (!hwnd) return 0;
+    x = width - S(20);
+    for (k = 0; k < n; k++) {
+        x -= bw[k];
+        buttons[k] = CreateWindowExW(0, L"BUTTON", labels[k], WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                                     x, by, bw[k], S(40), hwnd, (HMENU)(INT_PTR)(ID_MSG_B1 + k), inst, NULL);
+        SetWindowLongPtrW(buttons[k], GWLP_USERDATA, k == 0 ? ASK_BTN_PRIMARY : ASK_BTN_SECONDARY);
+        ask_hover_attach(buttons[k]);
+        SendMessageW(buttons[k], WM_SETFONT, (WPARAM)g_ask_font, TRUE);
+        x -= S(10);
+    }
+    EnableWindow(owner, FALSE);
+    ShowWindow(hwnd, SW_SHOW);
+    SetFocus(buttons[0]);
+    while (!st.done && GetMessageW(&m, NULL, 0, 0) > 0) {
+        if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) { st.done = -1; continue; }
+        if (m.message == WM_KEYDOWN && m.wParam == VK_RETURN && GetFocus() && GetParent(GetFocus()) == hwnd) {
+            st.done = GetDlgCtrlID(GetFocus()) - ID_MSG_B1 + 1;
+            continue;
+        }
+        if (!IsDialogMessageW(hwnd, &m)) { TranslateMessage(&m); DispatchMessageW(&m); }
+    }
+    EnableWindow(owner, TRUE);
+    DestroyWindow(hwnd);
+    SetActiveWindow(owner);
+    return st.done > 0 ? st.done : 0;
 }

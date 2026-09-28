@@ -18,6 +18,7 @@ typedef struct {
     int dns;            /* index into settings_dns */
     int tray_on_close;  /* the cross hides to the tray instead of exiting */
     int update_check;   /* look for a newer release on start */
+    int theme;          /* SETTINGS_THEME_*; UNSET until the first run picks one */
     int sub_interval;   /* index into settings_sub_hours */
     long long sub_last; /* when the subscription last loaded, Unix seconds */
     long long pac_last; /* when PAC URLs were last refreshed, Unix seconds */
@@ -48,6 +49,11 @@ extern const int        settings_dns_count;
 extern const char *const settings_log_levels[];
 extern const int          settings_log_level_count;
 #define SETTINGS_LOG_DEFAULT 4   /* "error" */
+
+/* 0 was "follow Windows" before 2.2.x; it now means "not chosen yet": the
+   first run reads the Windows theme once and stores light or dark. */
+enum { SETTINGS_THEME_UNSET = 0, SETTINGS_THEME_LIGHT, SETTINGS_THEME_DARK,
+       SETTINGS_THEME_KHOKHLOMA };
 
 void settings_defaults(app_settings *s);
 int  settings_load(app_settings *s);      /* missing file: defaults, returns 0 */

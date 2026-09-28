@@ -15,6 +15,15 @@ void set_open(HWND hwnd)
     SendMessageW(g_set_stack, CB_SETCURSEL, (WPARAM)g_set.stack, 0);
     SendMessageW(g_set_dns, CB_SETCURSEL, (WPARAM)g_set.dns, 0);
     SendMessageW(g_set_sub, CB_SETCURSEL, (WPARAM)g_set.sub_interval, 0);
+    {
+        /* Light, dark, khokhloma; the one Windows itself uses is marked. */
+        int dark = theme_system_is_dark();
+        SendMessageW(g_set_theme, CB_RESETCONTENT, 0, 0);
+        SendMessageW(g_set_theme, CB_ADDSTRING, 0, (LPARAM)(dark ? L"Светлая" : L"Светлая (как в системе)"));
+        SendMessageW(g_set_theme, CB_ADDSTRING, 0, (LPARAM)(dark ? L"Тёмная (как в системе)" : L"Тёмная"));
+        SendMessageW(g_set_theme, CB_ADDSTRING, 0, (LPARAM)L"Хохлома");
+        SendMessageW(g_set_theme, CB_SETCURSEL, (WPARAM)(g_set.theme - SETTINGS_THEME_LIGHT), 0);
+    }
     SetPropW(g_set_tray, L"utgard.checked", (HANDLE)(INT_PTR)(g_set.tray_on_close ? 1 : 0));
     InvalidateRect(g_set_tray, NULL, FALSE);
     SetPropW(g_set_auto, L"utgard.checked", (HANDLE)(INT_PTR)autostart_get());
@@ -30,6 +39,7 @@ void set_save(HWND hwnd)
     wchar_t buf[16], msg[160];
     long    mtu;
     LRESULT lvl;
+    int     theme_was;
 
     GetWindowTextW(g_set_mtu, buf, 16);
     mtu = wcstol(buf, NULL, 10);
@@ -52,6 +62,9 @@ void set_save(HWND hwnd)
     g_set.sub_interval = (lvl == CB_ERR) ? SETTINGS_SUB_DEFAULT : (int)lvl;
     g_set.tray_on_close = GetPropW(g_set_tray, L"utgard.checked") != NULL;
     g_set.update_check  = GetPropW(g_set_upd, L"utgard.checked") != NULL;
+    lvl = SendMessageW(g_set_theme, CB_GETCURSEL, 0, 0);
+    theme_was = g_set.theme;
+    if (lvl != CB_ERR) g_set.theme = SETTINGS_THEME_LIGHT + (int)lvl;
 
     if (!settings_save(&g_set)) {
         problem(hwnd, L"Не удалось сохранить настройки");
@@ -66,7 +79,9 @@ void set_save(HWND hwnd)
             return;
         }
     }
-    g_page = PAGE_UTGARD;
+    /* Applied as it changes: the page stays, the theme repaints only when
+       it was the theme that changed. */
+    if (theme_was != g_set.theme) theme_apply(hwnd);
     layout(hwnd);
 }
 
@@ -125,7 +140,7 @@ int upd_question(wchar_t *text, size_t cap)
 void upd_open_page(HWND hwnd)
 {
     if (!shell_open_unelevated(UTGARD_RELEASES_URL))
-        MessageBoxW(hwnd, L"Не удалось открыть браузер. Скачайте новую версию здесь "
+        modal_box(hwnd, L"Не удалось открыть браузер. Скачайте новую версию здесь "
                           L"(Ctrl+C копирует этот текст):\r\n\r\n" UTGARD_RELEASES_URL,
                     L"Utgard", MB_ICONINFORMATION | MB_OK);
 }
@@ -159,7 +174,7 @@ void upd_done(HWND hwnd, upd_job *j)
         if (j->manual || (IsWindowVisible(hwnd) && !g_modal)) upd_prompt(hwnd);
         else g_upd_pending = 1;
     } else if (j->manual) {
-        MessageBoxW(hwnd, L"У вас последняя версия (" UTGARD_VERSION_W L").",
+        modal_box(hwnd, L"У вас последняя версия (" UTGARD_VERSION_W L").",
                     L"Utgard", MB_ICONINFORMATION | MB_OK);
     }
     free(j);

@@ -14,7 +14,7 @@ static wchar_t   g_pk_checked[64][MAX_PATH];  /* ticked, remembered by path */
 static int     g_ed_enabled;                 /* kept across an edit */
 
 /* Where the second section starts depends on how many rows the first has. */
-int ed_path_top(void) { return TABS_H + S(92) + g_ed_ncount * S(36) + S(14); }
+int ed_path_top(void) { return TABS_H + S(96) + g_ed_ncount * S(48) + S(32); }
 
 /* ---- list files ------------------------------------------------------
    All file access for the lists goes through Win32, not stdio: the product
@@ -100,7 +100,7 @@ static int tidy_bridge(const wchar_t *in, wchar_t *out, size_t cap, int *removed
 }
 
 /* zapret's user host list, inside the zapret folder. */
-static int zapret_user_list(wchar_t *out, size_t cap)
+int zapret_user_list(wchar_t *out, size_t cap)
 {
     size_t len;
     if (!g_zap.valid || !g_zap.path[0]) return 0;
@@ -148,6 +148,7 @@ void hosts_open(HWND hwnd, int mode)
     free(text);
 
     g_page = PAGE_HOSTS;
+    hl_open();
     layout(hwnd);
     SetFocus(g_hedit);
 }
@@ -193,6 +194,7 @@ static void done_hosts_save(HWND hwnd, long_job *j)
     if (!j->ok) { problem(hwnd, j->msg); return; }
     SendMessageW(g_hedit, EM_SETMODIFY, FALSE, 0);
     lists_refresh_counts();
+    layout(hwnd);
     /* Leave only once it really saved, and only if the user is still here:
        they may have switched tabs while it compiled. */
     if (j->flag && g_page == PAGE_HOSTS) g_page = PAGE_UTGARD;
@@ -236,8 +238,22 @@ void hosts_save_zapret(HWND hwnd)
         return;
     }
     SendMessageW(g_hedit, EM_SETMODIFY, FALSE, 0);
-    g_page = PAGE_ZAPRET;
     layout(hwnd);
+}
+
+/* Save and compile a VPN list text that is not the one in the editor:
+   the target of a move from the zapret list. */
+void hosts_save_vpn_text(HWND hwnd, const char *utf8)
+{
+    long_job *j;
+    size_t    n = strlen(utf8);
+    if (g_busy) return;
+    j = job_new(work_hosts_save, done_hosts_save);
+    if (j) j->text = (char *)malloc(n + 1);
+    if (!j || !j->text) { job_free(j); problem(hwnd, L"Не хватило памяти"); return; }
+    memcpy(j->text, utf8, n + 1);
+    j->flag = 0;
+    job_start(hwnd, L"Сборка списка сайтов…", j);
 }
 
 void hosts_save_start(HWND hwnd, int leave_after)
@@ -294,7 +310,7 @@ void hosts_tidy(HWND hwnd)
 void hosts_back(HWND hwnd)
 {
     if (SendMessageW(g_hedit, EM_GETMODIFY, 0, 0)) {
-        int answer = MessageBoxW(hwnd, L"Сохранить изменения в списке?",
+        int answer = modal_box(hwnd, L"Сохранить изменения в списке?",
                                  L"Utgard", MB_ICONQUESTION | MB_YESNOCANCEL);
         if (answer == IDCANCEL) return;
         if (answer == IDYES) {
@@ -401,7 +417,7 @@ LRESULT CALLBACK alist_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             }
             if (zone == 1) {
                 if (!apps_set_enabled(&g_appv[i], !g_appv[i].enabled))
-                    MessageBoxW(hwnd, L"Не удалось переместить файл списка",
+                    modal_box(hwnd, L"Не удалось переместить файл списка",
                                 L"Utgard", MB_ICONWARNING | MB_OK);
                 apps_reload();
                 InvalidateRect(hwnd, NULL, TRUE);
@@ -414,10 +430,10 @@ LRESULT CALLBACK alist_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     L"Удалить список «%s»?\n\n"
                     L"Это сотрёт сохранённые настройки обхода для этих "
                     L"приложений. Отменить будет нельзя.", g_appv[i].name);
-                if (MessageBoxW(hwnd, q, L"Удаление списка",
+                if (modal_box(hwnd, q, L"Удаление списка",
                                 MB_ICONWARNING | MB_YESNO) == IDYES) {
                     if (!apps_delete(&g_appv[i]))
-                        MessageBoxW(hwnd, L"Не удалось удалить файл",
+                        modal_box(hwnd, L"Не удалось удалить файл",
                                     L"Utgard", MB_ICONWARNING | MB_OK);
                     apps_reload();
                     InvalidateRect(hwnd, NULL, TRUE);

@@ -506,7 +506,7 @@ static const wchar_t *friendly(const char *text)
         return L"Не удалось передать конфигурацию в sing-box.";
     if (has(text, "public_key") || has(text, "invalid uuid") ||
         has(text, "changeme")   || has(text, "invalid password"))
-        return L"Профиль настроен неверно или устарел. Импортируйте ссылку заново.";
+        return L"Сервер настроен неверно или устарел. Импортируйте ссылку заново.";
     if (has(text, "permission denied") || has(text, "access is denied"))
         return L"Недостаточно прав. Запустите клиент от администратора.";
     if (has(text, "address already in use") || has(text, "bind:"))
