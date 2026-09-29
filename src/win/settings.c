@@ -37,6 +37,7 @@ const int settings_dns_count =
 
 void settings_defaults(app_settings *s)
 {
+    s->zapret_path[0] = '\0';
     s->mtu           = SETTINGS_MTU_DEFAULT;
     s->log_level     = SETTINGS_LOG_DEFAULT;
     s->stack         = SETTINGS_STACK_DEFAULT;
@@ -87,7 +88,11 @@ int settings_load(app_settings *s)
         if (!eq) continue;
         *eq = '\0';
 
-        if (strcmp(line, "mtu") == 0) {
+        if (strcmp(line, "zapret_path") == 0) {
+            /* The rest of the line: a path may hold spaces, '=' or Cyrillic. */
+            size_t n = strlen(eq + 1);
+            if (n < sizeof s->zapret_path) memcpy(s->zapret_path, eq + 1, n + 1);
+        } else if (strcmp(line, "mtu") == 0) {
             long v = strtol(eq + 1, NULL, 10);
             if (v >= SETTINGS_MTU_MIN && v <= SETTINGS_MTU_MAX) s->mtu = (int)v;
         } else if (strcmp(line, "log_level") == 0) {
@@ -136,7 +141,7 @@ int settings_load(app_settings *s)
 int settings_save(const app_settings *s)
 {
     wchar_t path[MAX_PATH * 2];
-    char    buf[512];
+    char    buf[2048];
     int     lvl = (s->log_level >= 0 && s->log_level < settings_log_level_count)
                       ? s->log_level : SETTINGS_LOG_DEFAULT;
     int     stk = (s->stack >= 0 && s->stack < settings_stack_count)
@@ -154,6 +159,11 @@ int settings_save(const app_settings *s)
             settings_dns[dns].host, settings_dns[dns].type, s->tray_on_close ? 1 : 0, s->update_check ? 1 : 0,
             (s->theme >= 0 && s->theme <= 3) ? s->theme : 0,
             settings_sub_hours[sub], s->sub_last, s->pac_last)))
+        return 0;
+    if (s->zapret_path[0] &&
+        (FAILED(StringCchCatA(buf, sizeof buf, "zapret_path=")) ||
+         FAILED(StringCchCatA(buf, sizeof buf, s->zapret_path)) ||
+         FAILED(StringCchCatA(buf, sizeof buf, "\r\n"))))
         return 0;
 
     return file_write(path, buf, strlen(buf));

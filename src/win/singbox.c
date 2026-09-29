@@ -51,7 +51,9 @@ static int under_root(const wchar_t *tail, wchar_t *out, size_t cap)
 
 int singbox_exe(wchar_t *out, size_t cap)
 {
-    return under_root(L"sing-box\\sing-box.exe", out, cap);
+    wchar_t dir[MAX_PATH * 2];
+    return coredir_path(&CORE_SINGBOX, dir, MAX_PATH * 2) &&
+           SUCCEEDED(StringCchPrintfW(out, cap, L"%s\\sing-box.exe", dir));
 }
 
 static int to_utf8(const wchar_t *src, char *out, size_t cap)
@@ -138,6 +140,10 @@ int singbox_seed_config(void)
         else
             DeleteFileW(old);
     }
+
+    /* An older layout's sing-box\ (leftovers cleared above) moves into
+       core\ before the folder below is made, or it would be left behind. */
+    coredir_migrate(&CORE_SINGBOX);
 
     /* The folder exists from the start, with its permissions, so the first
        download goes into a protected place. */

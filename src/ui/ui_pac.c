@@ -120,7 +120,7 @@ static void work_pac(long_job *j)
         return;
     }
     if (!pacstore_load(&store)) {
-        StringCchCopyW(j->msg, SB_MSG_MAX, L"Не удалось прочитать pac.json");
+        StringCchCopyW(j->msg, SB_MSG_MAX, L"Не удалось прочитать настройки PAC");
         return;
     }
     if (task->op != PAC_OP_ADD && (task->index < 0 || task->index >= store.count)) {
@@ -248,7 +248,7 @@ void pac_open_page(HWND hwnd)
 {
     pac_store store;
     if (!pacstore_load(&store)) {
-        problem(hwnd, L"Не удалось прочитать pac.json: файл повреждён или создан более новой версией Utgard.");
+        problem(hwnd, L"Не удалось прочитать настройки PAC: файл повреждён или создан более новой версией Utgard.");
         return;
     }
     pacstore_free(&store);

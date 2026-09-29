@@ -19,6 +19,7 @@ typedef struct {
     int tray_on_close;  /* the cross hides to the tray instead of exiting */
     int update_check;   /* look for a newer release on start */
     int theme;          /* SETTINGS_THEME_*; UNSET until the first run picks one */
+    char zapret_path[1024];   /* the zapret folder, UTF-8; empty when not set */
     int sub_interval;   /* index into settings_sub_hours */
     long long sub_last; /* when the subscription last loaded, Unix seconds */
     long long pac_last; /* when PAC URLs were last refreshed, Unix seconds */

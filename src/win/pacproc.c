@@ -33,20 +33,83 @@ static int write_all(HANDLE h, const void *data, DWORD length)
     return 1;
 }
 
-typedef struct { HANDLE pipe; pacproc_init init; const pac_store *store; volatile LONG ok; } send_context;
+/* Sending the scripts runs on its own thread, so a helper that stops
+   reading cannot hang the caller. The thread's context lives on the heap
+   with its own copies of the scripts and a reference count shared with the
+   caller: if the caller gives up (timeout), it hands the pipe over instead
+   of closing it under a write still in progress, and whoever leaves last
+   closes the pipe and frees the copies. No stack frame, store or handle of
+   the caller is touched after it returns. */
+typedef struct {
+    HANDLE        pipe;
+    pacproc_init  init;
+    int           count;
+    char         *text[PAC_ITEMS_MAX];
+    DWORD         length[PAC_ITEMS_MAX];
+    volatile LONG ok, refs, owns_pipe;
+} send_context;
+
+static void send_release(send_context *c)
+{
+    int i;
+    if (InterlockedDecrement(&c->refs) != 0) return;
+    if (InterlockedCompareExchange(&c->owns_pipe, 0, 0) && c->pipe) CloseHandle(c->pipe);
+    for (i = 0; i < c->count; i++) if (c->text[i]) { SecureZeroMemory(c->text[i], c->length[i]); free(c->text[i]); }
+    SecureZeroMemory(c, sizeof *c);
+    free(c);
+}
+
+/* A context with copies of the enabled scripts, refs 2 (caller and sender);
+   NULL when out of memory or a script is empty or too long. */
+static send_context *send_new(HANDLE pipe, DWORD magic, const pac_store *store)
+{
+    send_context *c = (send_context *)calloc(1, sizeof *c);
+    int i;
+    if (!c) return NULL;
+    c->pipe = pipe; c->init.magic = magic; c->refs = 1;
+    for (i = 0; i < store->count; i++) if (store->items[i].enabled) {
+        size_t n = store->items[i].text ? strlen(store->items[i].text) : 0;
+        if (!n || n > PAC_MAX || n > MAXDWORD || c->count >= PAC_ITEMS_MAX ||
+            !(c->text[c->count] = (char *)malloc(n))) { send_release(c); return NULL; }
+        memcpy(c->text[c->count], store->items[i].text, n);
+        c->length[c->count++] = (DWORD)n;
+    }
+    c->init.script_count = (DWORD)c->count;
+    c->refs = 2;
+    return c;
+}
+
 static DWORD WINAPI send_scripts(void *opaque)
 {
-    send_context *context = (send_context *)opaque; int i;
-    if (!write_all(context->pipe, &context->init, sizeof context->init)) return 1;
-    for (i = 0; i < context->store->count; i++) if (context->store->items[i].enabled) {
-        size_t n = context->store->items[i].text ? strlen(context->store->items[i].text) : 0;
-        DWORD length;
-        if (!n || n > PAC_MAX || n > MAXDWORD) return 1;
-        length = (DWORD)n;
-        if (!write_all(context->pipe, &length, sizeof length) ||
-            !write_all(context->pipe, context->store->items[i].text, length)) return 1;
+    send_context *c = (send_context *)opaque; int i, ok = 1;
+    if (!write_all(c->pipe, &c->init, sizeof c->init)) ok = 0;
+    for (i = 0; ok && i < c->count; i++)
+        if (!write_all(c->pipe, &c->length[i], sizeof c->length[i]) ||
+            !write_all(c->pipe, c->text[i], c->length[i])) ok = 0;
+    if (ok) InterlockedExchange(&c->ok, 1);
+    send_release(c);
+    return 0;
+}
+
+/* The caller's side once the sender was started. On timeout the write is
+   cancelled and given two seconds; if it is still stuck, the sender keeps
+   the pipe (it closes it on its way out) and *pipe_given is set: the caller
+   must neither use nor close it. Returns 1 when every script was written. */
+static int send_finish(send_context *c, HANDLE thread, DWORD waited, int *pipe_given)
+{
+    int ok;
+    *pipe_given = 0;
+    if (waited != WAIT_OBJECT_0) {
+        CancelSynchronousIo(thread);
+        if (WaitForSingleObject(thread, 2000) != WAIT_OBJECT_0) {
+            InterlockedExchange(&c->owns_pipe, 1);
+            *pipe_given = 1;
+        }
     }
-    InterlockedExchange(&context->ok, 1); return 0;
+    ok = InterlockedCompareExchange(&c->ok, 0, 0) != 0;
+    CloseHandle(thread);
+    send_release(c);
+    return ok;
 }
 
 /* The helper lives in bin\ beside utgard.exe. */
@@ -173,7 +236,7 @@ int pacproc_prepare(pac_process *p, genconf_input *in, const pac_store *store, w
     HANDLE token = NULL; HANDLE inherit[2];
     SIZE_T bytes = 0; LPPROC_THREAD_ATTRIBUTE_LIST attrs = NULL; wchar_t path[2048], dir[2048], cmd[4096];
     pacproc_ready ready; pacproc_init init; BOOL started = FALSE; char actual_sha[65]; int i, count = 0;
-    send_context sender; HANDLE send_thread = NULL, image = INVALID_HANDLE_VALUE; DWORD create_error;
+    send_context *sender = NULL; HANDLE send_thread = NULL, image = INVALID_HANDLE_VALUE; DWORD create_error;
     if (!p || !in || !store) return say(err, cap, L"Внутренняя ошибка запуска PAC");
     ZeroMemory(p, sizeof *p); ZeroMemory(&ready, sizeof ready);
     if (!helper_paths(path, dir, p->helper_path)) return say(err, cap, L"Слишком длинный путь к папке Utgard");
@@ -215,21 +278,24 @@ int pacproc_prepare(pac_process *p, genconf_input *in, const pac_store *store, w
     init.magic = PACPROC_MAGIC; init.script_count = (DWORD)count;
     {
         HANDLE waits[2]; DWORD waited; ULONGLONG deadline = GetTickCount64() + 15000; int received = 0;
-        ZeroMemory(&sender, sizeof sender); sender.pipe = command_wr; sender.init = init; sender.store = store;
-        send_thread = CreateThread(NULL, 0, send_scripts, &sender, 0, NULL);
-        if (!send_thread) goto fail;
+        int given = 0, sent;
+        (void)init;
+        sender = send_new(command_wr, PACPROC_MAGIC, store);
+        if (!sender) goto fail;
+        send_thread = CreateThread(NULL, 0, send_scripts, sender, 0, NULL);
+        if (!send_thread) { sender->refs = 1; send_release(sender); sender = NULL; goto fail; }
         waits[0] = send_thread; waits[1] = p->process;
         waited = WaitForMultipleObjects(2, waits, FALSE, 15000);
-        if (waited != WAIT_OBJECT_0 || !InterlockedCompareExchange(&sender.ok, 0, 0)) {
-            if (waited == WAIT_TIMEOUT) CancelSynchronousIo(send_thread);
-            CloseHandle(command_wr); command_wr = NULL;
-            WaitForSingleObject(send_thread, 1000); CloseHandle(send_thread); send_thread = NULL;
+        sent = send_finish(sender, send_thread, waited, &given);
+        sender = NULL; send_thread = NULL;
+        if (given) command_wr = NULL;            /* the sender closes it now */
+        if (waited != WAIT_OBJECT_0 || !sent) {
+            if (command_wr) { CloseHandle(command_wr); command_wr = NULL; }
             TerminateProcess(p->process, 1);
             say(err, cap, waited == WAIT_TIMEOUT ? L"Передача PAC не завершилась за 15 секунд" :
                 L"PAC-процесс завершился во время передачи настроек");
             goto fail;
         }
-        CloseHandle(send_thread); send_thread = NULL;
         while (GetTickCount64() < deadline) {
             DWORD available = 0;
             if (WaitForSingleObject(p->process, 0) == WAIT_OBJECT_0) break;
@@ -252,7 +318,12 @@ int pacproc_prepare(pac_process *p, genconf_input *in, const pac_store *store, w
     in->vpn_proxy_port = ready.proxy_port; in->proxy_password = p->password; in->client_exe = p->helper_path; p->prepared = 1;
     CloseHandle(ready_rd); CloseHandle(token); DeleteProcThreadAttributeList(attrs); free(attrs); return 1;
 fail:
-    if (send_thread) { CancelSynchronousIo(send_thread); WaitForSingleObject(send_thread, 1000); CloseHandle(send_thread); }
+    if (send_thread) {
+        /* Not reached with a live sender today; kept safe regardless. */
+        int given = 0;
+        send_finish(sender, send_thread, WAIT_TIMEOUT, &given);
+        if (given) command_wr = NULL;
+    }
     if (image != INVALID_HANDLE_VALUE) CloseHandle(image);
     if (ready_rd) CloseHandle(ready_rd);
     if (ready_wr) CloseHandle(ready_wr);
@@ -308,30 +379,24 @@ void pacproc_vpn_off(void)
 
 int pacproc_reload(const pac_store *store)
 {
-    send_context sender;
+    send_context *sender;
     HANDLE thread;
-    int i, count = 0, ok = 0;
+    int i, count = 0, ok = 0, given = 0;
     if (!store) return 0;
     for (i = 0; i < store->count; i++) if (store->items[i].enabled) count++;
     if (!count || count > PAC_ITEMS_MAX) return 0;
     AcquireSRWLockExclusive(&reload_lock);
-    if (reload_pipe) {
-        ZeroMemory(&sender, sizeof sender);
-        sender.pipe = reload_pipe;
-        sender.init.magic = PACPROC_RELOAD_MAGIC;
-        sender.init.script_count = (DWORD)count;
-        sender.store = store;
-        thread = CreateThread(NULL, 0, send_scripts, &sender, 0, NULL);
+    if (reload_pipe && (sender = send_new(reload_pipe, PACPROC_RELOAD_MAGIC, store)) != NULL) {
+        thread = CreateThread(NULL, 0, send_scripts, sender, 0, NULL);
         if (thread) {
-            if (WaitForSingleObject(thread, 15000) == WAIT_TIMEOUT) {
-                CancelSynchronousIo(thread);
-                WaitForSingleObject(thread, 1000);
-            }
-            CloseHandle(thread);
-            ok = InterlockedCompareExchange(&sender.ok, 0, 0) != 0;
+            ok = send_finish(sender, thread, WaitForSingleObject(thread, 15000), &given);
+        } else {
+            sender->refs = 1; send_release(sender);
         }
-        /* A broken or stuck pipe is not used again: the caller reconnects. */
-        if (!ok || InterlockedExchange(&reload_drop, 0)) { CloseHandle(reload_pipe); reload_pipe = NULL; }
+        /* A broken or stuck pipe is not used again: the caller reconnects.
+           A pipe handed to a stuck sender is closed by it, not here. */
+        if (given) reload_pipe = NULL;
+        else if (!ok || InterlockedExchange(&reload_drop, 0)) { CloseHandle(reload_pipe); reload_pipe = NULL; }
     }
     ReleaseSRWLockExclusive(&reload_lock);
     return ok;

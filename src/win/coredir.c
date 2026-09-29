@@ -22,11 +22,53 @@ static int say(wchar_t *msg, size_t cap, const wchar_t *text)
     return 0;
 }
 
+/* Cores that could not be moved into core\ this session (one was running
+   from the old folder): they stay where they are until the next start. */
+static const core_desc *g_stay[4];
+static int              g_nstay;
+
+static int stays(const core_desc *c)
+{
+    int i;
+    for (i = 0; i < g_nstay; i++) if (g_stay[i] == c) return 1;
+    return 0;
+}
+
 int coredir_path(const core_desc *c, wchar_t *out, size_t cap)
 {
     wchar_t root[MAX_PATH * 2];
     if (!singbox_root(root, MAX_PATH * 2)) return 0;
-    return SUCCEEDED(StringCchPrintfW(out, cap, L"%s%s", root, c->dir));
+    return SUCCEEDED(StringCchPrintfW(out, cap, L"%s%s", root, stays(c) ? c->old_dir : c->dir));
+}
+
+int coredir_old_path(const core_desc *c, wchar_t *out, size_t cap)
+{
+    wchar_t root[MAX_PATH * 2];
+    if (!singbox_root(root, MAX_PATH * 2)) return 0;
+    return SUCCEEDED(StringCchPrintfW(out, cap, L"%s%s", root, c->old_dir));
+}
+
+/* Before 2.3.2 the cores lived beside utgard.exe; now in core\. A rename
+   within the folder keeps owner and access list, so the checks still pass.
+   It fails while the core runs from the old folder (a VPN left on across
+   the update): then this session keeps the old path throughout - process
+   recognition, the service path, the checks - and the next start moves it. */
+void coredir_migrate(const core_desc *c)
+{
+    wchar_t oldp[MAX_PATH * 2], newp[MAX_PATH * 2], parent[MAX_PATH * 2], *slash;
+    DWORD   a;
+    if (!coredir_old_path(c, oldp, MAX_PATH * 2)) return;
+    a = GetFileAttributesW(oldp);
+    if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY) || (a & FILE_ATTRIBUTE_REPARSE_POINT))
+        return;                                         /* nothing to move */
+    if (!singbox_root(parent, MAX_PATH * 2) ||
+        FAILED(StringCchPrintfW(newp, MAX_PATH * 2, L"%s%s", parent, c->dir))) return;
+    /* An empty folder at the new place (an interrupted move, or made ahead
+       of it) gives way; a folder with files in it means the move is done. */
+    if (GetFileAttributesW(newp) != INVALID_FILE_ATTRIBUTES && !RemoveDirectoryW(newp)) return;
+    StringCchCopyW(parent, MAX_PATH * 2, newp);
+    if ((slash = wcsrchr(parent, L'\\')) != NULL) { *slash = 0; CreateDirectoryW(parent, NULL); }
+    if (!MoveFileExW(oldp, newp, 0) && g_nstay < 4) g_stay[g_nstay++] = c;
 }
 
 int coredir_volume_has_acl(const wchar_t *path)

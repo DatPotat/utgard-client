@@ -53,3 +53,39 @@ int pacblob_unpack(const unsigned char *blob,size_t length,const char *script,si
     if(memcmp(digest,blob+1,32)){memset(digest,0,sizeof digest);return 0;}memset(digest,0,sizeof digest);
     memcpy(source,blob+33,count*2);if(source[count-1])return 0;{size_t i;for(i=0;i+1<count;i++)if(!source[i])return 0;}if(units)*units=count;return 1;
 }
+
+size_t pacitem_pack(int enabled, const uint16_t *source, size_t units,
+                    const char *script, size_t n, unsigned char *out, size_t cap)
+{
+    size_t need = 1 + 1 + 2 + units * 2 + 4 + n, i, at = 0;
+    if (!source || !script || !out || !units || units > PAC_BLOB_SOURCE_MAX || source[units - 1] != 0 ||
+        !n || n > 0xFFFFFFFFu || need > cap) return 0;
+    out[at++] = (unsigned char)PAC_ITEM_FORMAT;
+    out[at++] = enabled ? 1 : 0;
+    out[at++] = (unsigned char)(units & 0xFF); out[at++] = (unsigned char)(units >> 8);
+    for (i = 0; i < units; i++) { out[at++] = (unsigned char)(source[i] & 0xFF); out[at++] = (unsigned char)(source[i] >> 8); }
+    for (i = 0; i < 4; i++) out[at++] = (unsigned char)((uint32_t)n >> (8 * i));
+    memcpy(out + at, script, n);
+    return need;
+}
+
+int pacitem_unpack(const unsigned char *b, size_t len, size_t script_max,
+                   int *enabled, uint16_t *source, size_t source_cap, size_t *source_units,
+                   const unsigned char **script, size_t *script_length)
+{
+    size_t units, n, i, at = 4;
+    if (!b || len < 1 + 1 + 2 + 2 + 4 + 1 || b[0] != PAC_ITEM_FORMAT || b[1] > 1) return 0;
+    units = (size_t)b[2] | ((size_t)b[3] << 8);
+    if (!units || units > PAC_BLOB_SOURCE_MAX || units > source_cap || len < at + units * 2 + 4) return 0;
+    for (i = 0; i < units; i++) source[i] = (uint16_t)(b[at + 2 * i] | (b[at + 2 * i + 1] << 8));
+    if (source[units - 1] != 0) return 0;
+    at += units * 2;
+    n = (size_t)b[at] | ((size_t)b[at + 1] << 8) | ((size_t)b[at + 2] << 16) | ((size_t)b[at + 3] << 24);
+    at += 4;
+    if (!n || n > script_max || len != at + n) return 0;
+    *enabled = b[1];
+    if (source_units) *source_units = units;
+    *script = b + at;
+    *script_length = n;
+    return 1;
+}

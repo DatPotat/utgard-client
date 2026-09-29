@@ -28,6 +28,7 @@ GP(GdipFillEllipse);       GP(GdipWidenPath);
 
 static ULONG_PTR g_token;
 static int       g_gp;
+static HMODULE   g_gp_module;
 
 void gfx_startup(void)
 {
@@ -35,7 +36,8 @@ void gfx_startup(void)
     GdiplusStartupInput in = { 1, NULL, FALSE, FALSE };
 
     if (!m) return;
-#define LOAD(fn) if (!(p_##fn = (__typeof__(p_##fn))(void *)GetProcAddress(m, #fn))) return
+    g_gp_module = m;
+#define LOAD(fn) if (!(p_##fn = (__typeof__(p_##fn))(void *)GetProcAddress(m, #fn))) { gfx_shutdown(); return; }
     LOAD(GdiplusStartup);       LOAD(GdiplusShutdown);
     LOAD(GdipCreateFromHDC);    LOAD(GdipDeleteGraphics);
     LOAD(GdipSetSmoothingMode); LOAD(GdipSetPixelOffsetMode);
@@ -48,12 +50,15 @@ void gfx_startup(void)
     LOAD(GdipFillEllipse);      LOAD(GdipWidenPath);
 #undef LOAD
     g_gp = p_GdiplusStartup(&g_token, &in, NULL) == Ok;
+    if (!g_gp) gfx_shutdown();
 }
 
 void gfx_shutdown(void)
 {
     if (g_gp) p_GdiplusShutdown(g_token);
     g_gp = 0;
+    if (g_gp_module) FreeLibrary(g_gp_module);
+    g_gp_module = NULL;
 }
 
 static ARGB argb(COLORREF c)

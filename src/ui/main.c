@@ -3,6 +3,7 @@
  */
 
 #include "coremanifest.h"
+#include "coredir.h"
 #include "shellopen.h"
 #include "awgcore.h"
 #include "awgsvc.h"
@@ -131,16 +132,14 @@ zapret_status g_status;
 static void pac_unreadable_notice(HWND hwnd)
 {
     wchar_t aside[MAX_PATH * 2], text[MAX_PATH * 2 + 400];
-    const wchar_t *name;
     if (!pacstore_unreadable_notice(aside, MAX_PATH * 2)) return;
-    name = wcsrchr(aside, L'\\');
     if (aside[0])
         StringCchPrintfW(text, sizeof text / sizeof text[0],
-            L"Не удалось прочитать pac.json. Файл не удалён: он переименован в %s рядом с utgard.exe. Настройки PAC начаты заново.",
-            name ? name + 1 : aside);
+            L"Не удалось прочитать файл PAC. Он не удалён, а переименован в %s. Этот PAC нужно добавить заново, остальные работают как прежде.",
+            aside);                              /* full path: the file may be in list\\pac */
     else
         StringCchCopyW(text, sizeof text / sizeof text[0],
-            L"Не удалось прочитать pac.json и переименовать его. Чтобы не потерять файл, настройки PAC не будут сохраняться до перезапуска Utgard.");
+            L"Не удалось прочитать файл PAC и переименовать его. Чтобы не потерять его, настройки PAC не будут сохраняться до перезапуска Utgard.");
     problem(hwnd, text);
 }
 
@@ -673,14 +672,15 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     theme_apply(hwnd);
     {
         wchar_t remembered[ZAPRET_PATH_MAX];
-        if (zapret_path_load(remembered, ZAPRET_PATH_MAX))
+        if (g_set.zapret_path[0] &&
+            MultiByteToWideChar(CP_UTF8, 0, g_set.zapret_path, -1, remembered, ZAPRET_PATH_MAX) > 0)
             zapret_scan(remembered, &g_zap);
     }
     if (!profiles_load(&g_prof, g_prof_aside, MAX_PATH * 2))
         g_prof_unreadable = 1;
     profiles_reload();
     {
-        static const wchar_t *dirs[] = { L"sing-box", L"list",
+        static const wchar_t *dirs[] = { L"core", L"list", L"list\\pac",
                                          L"list\\applications", L"logs" };
         wchar_t d[MAX_PATH * 2];
         size_t  k;
@@ -692,6 +692,9 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         apps_prepare();
     }
     singbox_seed_config();
+    /* sing-box\ was moved by seed_config; amneziawg\ moves here, before the
+       service cleanup compares service paths. */
+    coredir_migrate(&CORE_AWG);
     /* A tunnel service left by a crash is removed; one still running
        belongs to a VPN that is still on. */
     awgsvc_cleanup();
@@ -1274,9 +1277,25 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     if (FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)))
         return 1;
 
+    /* Runtime DLL loads from System32 only (static imports are resolved
+       before this runs; the folder's permissions guard those). */
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
     gfx_startup();
     fonts_load_embedded();   /* before any font is created */
     settings_load(&g_set);
+    {
+        /* zapret-path.txt of older versions moves into settings.txt; the
+           old file goes only once the new one is written. */
+        wchar_t old[ZAPRET_PATH_MAX];
+        if (!g_set.zapret_path[0] && zapret_path_load_legacy(old, ZAPRET_PATH_MAX)) {
+            if (WideCharToMultiByte(CP_UTF8, 0, old, -1, g_set.zapret_path,
+                                    (int)sizeof g_set.zapret_path, NULL, NULL) > 0) {
+                if (settings_save(&g_set)) zapret_path_forget_legacy();
+            } else {
+                g_set.zapret_path[0] = '\0';      /* nothing half-converted kept */
+            }
+        }
+    }
     theme_pick();
     brushes_create();
 

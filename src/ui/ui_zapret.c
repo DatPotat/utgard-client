@@ -417,7 +417,11 @@ void on_pick_path(HWND hwnd)
         g_zap = scanned;
     } else {
         g_zap = scanned;
-        zapret_path_save(g_zap.path);
+        if (WideCharToMultiByte(CP_UTF8, 0, g_zap.path, -1, g_set.zapret_path,
+                                (int)sizeof g_set.zapret_path, NULL, NULL) > 0)
+            settings_save(&g_set);
+        else
+            g_set.zapret_path[0] = '\0';          /* too long: not remembered, nothing half-written */
     }
 
     strategies_reload();

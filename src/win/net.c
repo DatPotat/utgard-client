@@ -104,6 +104,11 @@ static int fetch(const wchar_t *url, char **body, size_t *len,
                              WINHTTP_DEFAULT_ACCEPT_TYPES,
                              uc.nScheme == INTERNET_SCHEME_HTTPS
                                  ? WINHTTP_FLAG_SECURE : 0);
+    if (req) {
+        /* WinHTTP's default already refuses https -> http; say so here too. */
+        DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
+        WinHttpSetOption(req, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof policy);
+    }
     if (!req) { fail_code(err, errcap, L"Не удалось создать запрос", GetLastError());
                 goto done; }
     if (pac) {
@@ -264,6 +269,11 @@ int net_download(const wchar_t *url, const wchar_t *path,
 
     req = WinHttpOpenRequest(conn, L"GET", upath, NULL, WINHTTP_NO_REFERER,
                              WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (req) {
+        /* WinHTTP's default already refuses https -> http; say so here too. */
+        DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
+        WinHttpSetOption(req, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof policy);
+    }
     if (!req) { fail_code(err, errcap, L"Не удалось создать запрос", GetLastError());
                 goto done; }
 
