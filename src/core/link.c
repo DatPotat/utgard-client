@@ -9,6 +9,22 @@
 
 /* ---- small bounded helpers ------------------------------------------ */
 
+/* Bounded copies (see lists.c): memcpy with an explicit capacity. */
+static void copy_bounded(char *dst, size_t cap, const char *src)
+{
+    size_t n = strlen(src);
+    if (!cap) return;
+    if (n >= cap) n = cap - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+static void append_bounded(char *dst, size_t cap, const char *src)
+{
+    size_t have = strlen(dst);
+    if (have < cap) copy_bounded(dst + have, cap - have, src);
+}
+
 static int oops(char *err, size_t cap, const char *msg)
 {
     if (err && cap) {
@@ -393,7 +409,7 @@ static int parse_vmess(const char *b64, link_profile *out, char *err, size_t err
 
     json_field(o, "scy", f, sizeof f);
     lower(f);
-    if (!f[0]) strcpy(f, "auto");
+    if (!f[0]) copy_bounded(f, sizeof f, "auto");
     for (i = 0; i < sizeof SECURITY / sizeof SECURITY[0]; i++)
         if (str_eq(f, SECURITY[i])) break;
     if (i == sizeof SECURITY / sizeof SECURITY[0]) {
@@ -1037,8 +1053,8 @@ static int amnezia_fields_text(const JSON_Object *lc, const JSON_Object *proto,
         for (i = 0; i < json_array_get_count(arr); i++) {
             const char *ip = json_array_get_string(arr, i);
             if (!ip || strlen(ips) + strlen(ip) + 3 >= sizeof ips) continue;
-            if (ips[0]) strcat(ips, ", ");
-            strcat(ips, ip);
+            if (ips[0]) append_bounded(ips, sizeof ips, ", ");
+            append_bounded(ips, sizeof ips, ip);
         }
     }
     if (!ips[0]) snprintf(ips, sizeof ips, "0.0.0.0/0, ::/0");
@@ -1065,7 +1081,7 @@ static int amnezia_fields_text(const JSON_Object *lc, const JSON_Object *proto,
                        json_text_of(awg_src, AMNEZIA_AWG_KEYS[i], b1, sizeof b1)))
             return oops(err, errcap, "ссылка vpn:// повреждена");
     if (strlen(out) + 8 >= cap) return oops(err, errcap, "ссылка vpn:// повреждена");
-    strcat(out, "[Peer]\n");
+    append_bounded(out, cap, "[Peer]\n");
     if (!synth_add(out, cap, "PublicKey", json_text_of(lc, "server_pub_key", b1, sizeof b1)) ||
         !synth_add(out, cap, "PresharedKey", json_text_of(lc, "psk_key", b1, sizeof b1)) ||
         !synth_add(out, cap, "Endpoint", ep) ||
@@ -1123,8 +1139,8 @@ static int amnezia_json(const char *json_text, link_profile *out, char *err, siz
         if (!name) continue;
         if (!amnezia_supported(name)) {
             if (strlen(unsupported) + strlen(name) + 3 < sizeof unsupported) {
-                if (unsupported[0]) strcat(unsupported, ", ");
-                strcat(unsupported, name);
+                if (unsupported[0]) append_bounded(unsupported, sizeof unsupported, ", ");
+                append_bounded(unsupported, sizeof unsupported, name);
             }
             continue;
         }
@@ -1332,7 +1348,7 @@ static int link_parse_raw(const char *uri, link_profile *out, char *err, size_t 
     if (!uri || !out) return oops(err, errcap, "пустая ссылка");
     memset(out, 0, sizeof *out);
     out->port = 443;
-    strcpy(out->fingerprint, "chrome");
+    copy_bounded(out->fingerprint, sizeof out->fingerprint, "chrome");
 
     while (*uri == ' ' || *uri == '\t' || *uri == '\r' || *uri == '\n') uri++;
 
@@ -1644,11 +1660,22 @@ int link_parse(const char *uri, link_profile *out, char *err, size_t errcap)
     return link_parse_raw(uri, out, err, errcap) && fields_utf8(out, err, errcap);
 }
 
-int link_parse_subscription(const char *body, size_t len,
+/* Buffers of the subscription parse, wiped after it (link_parse_subscription). */
+static char sub_decoded[NET_SUBSCRIPTION_DECODED_MAX];
+static char sub_line[LINK_URI_MAX + 1];
+
+/* volatile: a plain memset of a buffer about to go unused is dead code the
+   optimiser may drop. */
+static void wipe(void *buf, size_t n)
+{
+    volatile unsigned char *p = (volatile unsigned char *)buf;
+    while (n--) *p++ = 0;
+}
+
+static int parse_subscription(const char *body, size_t len,
                             link_profile *out, int max, int *skipped,
                             char *err, size_t errcap)
 {
-    static char decoded[NET_SUBSCRIPTION_DECODED_MAX];
     const char *text;
     size_t      text_len;
     const char *p, *end;
@@ -1661,10 +1688,10 @@ int link_parse_subscription(const char *body, size_t len,
         text = body;
         text_len = len;
     } else {
-        long n = b64_decode(body, len, decoded, sizeof decoded);
+        long n = b64_decode(body, len, sub_decoded, sizeof sub_decoded);
         if (n <= 0)
             return oops(err, errcap, "ответ не похож ни на список ссылок, ни на base64");
-        text = decoded;
+        text = sub_decoded;
         text_len = (size_t)n;
     }
 
@@ -1676,16 +1703,15 @@ int link_parse_subscription(const char *body, size_t len,
         const char *stop = nl ? nl : end;
         /* An Amnezia key runs to kilobytes: a line may be as long as a
            link can be at all. Static: this runs on one worker at a time. */
-        static char line[LINK_URI_MAX + 1];
         size_t      n = (size_t)(stop - p);
 
         while (n && (p[n - 1] == '\r' || p[n - 1] == ' ' || p[n - 1] == '\t')) n--;
         while (n && (*p == ' ' || *p == '\t')) { p++; n--; }
 
-        if (n && n < sizeof line) {
-            memcpy(line, p, n);
-            line[n] = '\0';
-            if (link_parse(line, &out[found], NULL, 0)) found++;
+        if (n && n < sizeof sub_line) {
+            memcpy(sub_line, p, n);
+            sub_line[n] = '\0';
+            if (link_parse(sub_line, &out[found], NULL, 0)) found++;
             else if (skipped) (*skipped)++;
         } else if (n && skipped) {
             (*skipped)++;
@@ -1698,6 +1724,18 @@ int link_parse_subscription(const char *body, size_t len,
     if (found == 0)
         return oops(err, errcap, "в подписке не нашлось поддерживаемых ссылок");
     return found;
+}
+
+/* The decoded body and each line hold links with keys and passwords: both
+   are wiped however the parse ends; the links found are already copied out. */
+int link_parse_subscription(const char *body, size_t len,
+                            link_profile *out, int max, int *skipped,
+                            char *err, size_t errcap)
+{
+    int r = parse_subscription(body, len, out, max, skipped, err, errcap);
+    wipe(sub_decoded, sizeof sub_decoded);
+    wipe(sub_line, sizeof sub_line);
+    return r;
 }
 
 /* A file picked as a WireGuard/AmneziaWG config: a wg-quick config, or a

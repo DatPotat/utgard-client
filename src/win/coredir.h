@@ -16,7 +16,9 @@ typedef struct {
 } coredir_hold;
 
 /* <root>\<core dir>. */
-int coredir_path(const core_desc *c, wchar_t *out, size_t cap);
+int  coredir_path(const core_desc *c, wchar_t *out, size_t cap);
+int  coredir_old_path(const core_desc *c, wchar_t *out, size_t cap);
+void coredir_migrate(const core_desc *c);   /* at start: old folder -> core\<name> */
 
 /* 0 on FAT32/exFAT and other volumes that cannot keep permissions. */
 int coredir_volume_has_acl(const wchar_t *path);

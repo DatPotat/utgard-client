@@ -68,7 +68,28 @@ static void test_blob(void)
     n=pacblob_pack(script,strlen(script),source,sizeof source/2,blob,sizeof blob);CHECK(n);
     {static const unsigned char abc[32]={0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad};unsigned char known[128];size_t k=pacblob_pack("abc",3,source,sizeof source/2,known,sizeof known);CHECK(k&&memcmp(known+1,abc,32)==0);}
     CHECK(pacblob_unpack(blob,n,script,strlen(script),out_source,32,&units)&&units==sizeof source/2&&!memcmp(source,out_source,sizeof source));
-    CHECK(!pacblob_unpack(blob,n,"tampered",8,out_source,32,NULL));memcpy(copy,blob,n);copy[0]=9;
+    CHECK(!pacblob_unpack(blob,n,"tampered",8,out_source,32,NULL));
+    {   /* one PAC per file: round trip, and every malformed shape refused */
+        static const uint16_t src[] = { 'h','t','t','p','s',':','/','/','a',0 };
+        unsigned char item[256], bad[256]; const unsigned char *sc; size_t sl, u, m; int en; uint16_t back[16];
+        m = pacitem_pack(1, src, 10, "function FindProxyForURL(){}", 28, item, sizeof item);
+        CHECK(m == 1 + 1 + 2 + 20 + 4 + 28);
+        CHECK(pacitem_unpack(item, m, 4096, &en, back, 16, &u, &sc, &sl) && en == 1 && u == 10 &&
+              sl == 28 && !memcmp(sc, "function FindProxyForURL(){}", 28) && !memcmp(back, src, sizeof src));
+        CHECK(!pacitem_unpack(item, m - 1, 4096, &en, back, 16, &u, &sc, &sl));       /* short */
+        memcpy(bad, item, m); bad[m] = 0;
+        CHECK(!pacitem_unpack(bad, m + 1, 4096, &en, back, 16, &u, &sc, &sl));        /* trailing byte */
+        memcpy(bad, item, m); bad[0] = 1;
+        CHECK(!pacitem_unpack(bad, m, 4096, &en, back, 16, &u, &sc, &sl));            /* wrong format */
+        memcpy(bad, item, m); bad[1] = 2;
+        CHECK(!pacitem_unpack(bad, m, 4096, &en, back, 16, &u, &sc, &sl));            /* bad flag */
+        CHECK(!pacitem_unpack(item, m, 27, &en, back, 16, &u, &sc, &sl));             /* over the limit */
+        CHECK(!pacitem_unpack(item, m, 4096, &en, back, 5, &u, &sc, &sl));            /* source too long */
+        memcpy(bad, item, m); bad[4 + 18] = 'x';
+        CHECK(!pacitem_unpack(bad, m, 4096, &en, back, 16, &u, &sc, &sl));            /* source not terminated */
+        CHECK(!pacitem_pack(1, src, 10, "x", 1, item, 10));                           /* no room */
+        CHECK(!pacitem_pack(1, src, 9, "x", 1, item, sizeof item));                   /* source without NUL */
+    }memcpy(copy,blob,n);copy[0]=9;
     CHECK(!pacblob_unpack(copy,n,script,strlen(script),out_source,32,NULL));CHECK(!pacblob_unpack(blob,n-1,script,strlen(script),out_source,32,NULL));
     CHECK(!pacblob_pack(script,strlen(script),source,sizeof source/2,blob,10));
     CHECK(!pacblob_pack(script,strlen(script),source,PAC_BLOB_SOURCE_MAX+1u,blob,sizeof blob));

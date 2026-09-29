@@ -98,7 +98,9 @@ int zapret_hosts_check(wchar_t *temp_path, size_t temp_cap, int *needs_update,
                        wchar_t *err, size_t errcap);
 
 /* Remembered folder, stored next to the executable. */
-int zapret_path_load(wchar_t *buf, size_t cap);   /* 1 if something was read */
-int zapret_path_save(const wchar_t *path);        /* 1 on success */
+/* The zapret folder lives in settings.txt (zapret_path). zapret-path.txt is
+   the place older versions kept it: read once to move it, then deleted. */
+int  zapret_path_load_legacy(wchar_t *buf, size_t cap);   /* 1 if something was read */
+void zapret_path_forget_legacy(void);
 
 #endif

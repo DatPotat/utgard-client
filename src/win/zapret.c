@@ -300,20 +300,7 @@ static int state_file(wchar_t *buf, size_t cap)
     return SUCCEEDED(StringCchPrintfW(buf, cap, L"%szapret-path.txt", dir));
 }
 
-int zapret_path_save(const wchar_t *path)
-{
-    wchar_t file[ZAPRET_PATH_MAX];
-    char    utf8[ZAPRET_PATH_MAX * 3];
-    int     bytes;
-
-    if (!state_file(file, ZAPRET_PATH_MAX)) return 0;
-
-    bytes = WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8, (int)sizeof utf8, NULL, NULL);
-    if (bytes <= 1) return 0;
-    return file_write(file, utf8, (size_t)(bytes - 1));   /* without the NUL */
-}
-
-int zapret_path_load(wchar_t *buf, size_t cap)
+int zapret_path_load_legacy(wchar_t *buf, size_t cap)
 {
     wchar_t file[ZAPRET_PATH_MAX];
     char    utf8[ZAPRET_PATH_MAX * 3];
@@ -709,4 +696,11 @@ int zapret_service_restart(wchar_t *err, size_t errcap)
     CloseServiceHandle(svc);
     CloseServiceHandle(scm);
     return ok;
+}
+
+/* After its content moved into settings.txt, the old file goes. */
+void zapret_path_forget_legacy(void)
+{
+    wchar_t file[ZAPRET_PATH_MAX];
+    if (state_file(file, ZAPRET_PATH_MAX)) DeleteFileW(file);
 }

@@ -63,6 +63,18 @@ static int starts(const char *s, const char *p)
    ad-block decorations, everything after the first slash or space, and
    lowercase what is left. IPs and CIDRs are returned untouched, because the
    slash cleanup would turn 203.0.113.0/24 into a single host. */
+/* Bounded copies: the length is checked before every call already; these
+   keep it so if a check is ever moved. memcpy, not snprintf - newer gcc
+   flags snprintf truncation as an error. */
+static void copy_bounded(char *dst, size_t cap, const char *src)
+{
+    size_t n = strlen(src);
+    if (!cap) return;
+    if (n >= cap) n = cap - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
 int lists_normalize(const char *raw, char *out, size_t cap)
 {
     char buf[LIST_ENTRY_MAX * 2];
@@ -70,7 +82,7 @@ int lists_normalize(const char *raw, char *out, size_t cap)
     size_t i;
 
     if (strlen(raw) >= sizeof buf) return 0;
-    strcpy(buf, raw);
+    copy_bounded(buf, sizeof buf, raw);
 
     hash = strchr(buf, '#');
     if (hash) *hash = '\0';
@@ -109,7 +121,7 @@ int lists_normalize(const char *raw, char *out, size_t cap)
        the tunnel - so it is refused rather than obeyed. */
     if (!strchr(buf, '.')) return -1;
 
-    strcpy(out, buf);
+    copy_bounded(out, cap, buf);
     return 1;
 }
 
@@ -134,7 +146,7 @@ int lists_read_text(const char *in, char out[][LIST_ENTRY_MAX], int max)
             line[len] = '\0';
             trim(line);
             if (line[0] && line[0] != '#' && strlen(line) < LIST_ENTRY_MAX) {
-                strcpy(out[n], line);
+                copy_bounded(out[n], LIST_ENTRY_MAX, line);
                 n++;
             }
         }
@@ -194,11 +206,11 @@ int lists_build_text(const char *in, char *out, size_t outcap, lists_stats *st)
         if (strchr(entry, '/')) {
             for (j = 0; j < ni; j++) if (strcmp(ips[j], entry) == 0) { seen = 1; break; }
             if (seen) { dup++; continue; }
-            if (ni < LIST_MAX) strcpy(ips[ni++], entry);
+            if (ni < LIST_MAX) copy_bounded(ips[ni++], LIST_ENTRY_MAX, entry);
         } else {
             for (j = 0; j < nd; j++) if (strcmp(domains[j], entry) == 0) { seen = 1; break; }
             if (seen) { dup++; continue; }
-            if (nd < LIST_MAX) strcpy(domains[nd++], entry);
+            if (nd < LIST_MAX) copy_bounded(domains[nd++], LIST_ENTRY_MAX, entry);
         }
     }
 
@@ -290,7 +302,7 @@ int lists_tidy_text(const char *in, char *out, size_t outcap, int *removed)
                     for (j = 0; j < n; j++)
                         if (strcmp(norm[j], entry) == 0) { seen = 1; break; }
                     if (seen) gone++;
-                    else      strcpy(norm[n++], entry);
+                    else      copy_bounded(norm[n++], LIST_ENTRY_MAX, entry);
                 }
             }
         }
@@ -306,7 +318,7 @@ int lists_tidy_text(const char *in, char *out, size_t outcap, int *removed)
                 gone++;
                 continue;
             }
-            strcpy(kept[k++], norm[i]);
+            copy_bounded(kept[k++], LIST_ENTRY_MAX, norm[i]);
         }
         n = k;
     }
@@ -416,7 +428,7 @@ int lists_tidy_zapret(const char *in, char *out, size_t outcap, int *removed)
             if (line[0] && line[0] != '#' && strlen(line) < LIST_ENTRY_MAX) {
                 for (k = 0; line[k]; k++)
                     if (line[k] >= 'A' && line[k] <= 'Z') line[k] = (char)(line[k] - 'A' + 'a');
-                strcpy(ent[n], line);
+                copy_bounded(ent[n], LIST_ENTRY_MAX, line);
                 plain[n] = zap_plain(line);
                 drop[n]  = 0;
                 n++;

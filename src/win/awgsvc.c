@@ -37,15 +37,25 @@ static int say(wchar_t *msg, size_t cap, const wchar_t *text)
 
 const wchar_t *awgsvc_interface(void) { return TUNNEL; }
 
-static int bin_path(wchar_t *out, size_t cap)
+static int bin_path_in(const wchar_t *dir, wchar_t *out, size_t cap)
 {
-    wchar_t dir[MAX_PATH * 2];
-    if (!coredir_path(&CORE_AWG, dir, MAX_PATH * 2)) return 0;
     return SUCCEEDED(StringCchPrintfW(out, cap, L"\"%s\\%s\" /tunnelservice %s",
                                       dir, CORE_AWG.files[0].name, PIPE));
 }
 
+static int bin_path(wchar_t *out, size_t cap)
+{
+    wchar_t dir[MAX_PATH * 2];
+    return coredir_path(&CORE_AWG, dir, MAX_PATH * 2) && bin_path_in(dir, out, cap);
+}
+
 /* 1 ours, 0 absent, -1 someone else's service under our name. */
+/* Exactly the rights the calls below need: QueryServiceConfigW,
+   ChangeServiceConfig2W, QueryServiceStatusEx, StartServiceW, the stop
+   control and DeleteService - not SERVICE_ALL_ACCESS. */
+#define AWG_SVC_ACCESS (SERVICE_QUERY_CONFIG | SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS | \
+                        SERVICE_START | SERVICE_STOP | DELETE)
+
 static int service_is_ours(SC_HANDLE svc)
 {
     wchar_t                 want[MAX_PATH * 3];
@@ -57,9 +67,15 @@ static int service_is_ours(SC_HANDLE svc)
     QueryServiceConfigW(svc, NULL, 0, &need);
     cfg = (QUERY_SERVICE_CONFIGW *)LocalAlloc(LPTR, need ? need : 1);
     if (!cfg) return -1;
-    if (QueryServiceConfigW(svc, cfg, need, &need) && cfg->lpBinaryPathName &&
-        _wcsicmp(cfg->lpBinaryPathName, want) == 0)
-        ours = 1;
+    if (QueryServiceConfigW(svc, cfg, need, &need) && cfg->lpBinaryPathName) {
+        wchar_t old[MAX_PATH * 2], oldbin[MAX_PATH * 3];
+        if (_wcsicmp(cfg->lpBinaryPathName, want) == 0)
+            ours = 1;
+        /* A session service registered before the move to core\ is ours too. */
+        else if (coredir_old_path(&CORE_AWG, old, MAX_PATH * 2) && bin_path_in(old, oldbin, MAX_PATH * 3) &&
+                 _wcsicmp(cfg->lpBinaryPathName, oldbin) == 0)
+            ours = 1;
+    }
     LocalFree(cfg);
     return ours;
 }
@@ -101,11 +117,11 @@ static void explain_stop(DWORD win32, DWORD specific, wchar_t *msg, size_t cap)
     if (!msg || !cap) return;
     if (win32 == ERROR_SERVICE_SPECIFIC_ERROR)
         StringCchPrintfW(msg, cap, L"AmneziaWG не запустился: %s (код %lu).\n\n"
-                         L"Подробности — в журнале службы: amneziawg\\amneziawg.exe /dumplog",
+                         L"Подробности — в журнале службы: core\\amneziawg\\amneziawg.exe /dumplog",
                          service_error(specific), (unsigned long)specific);
     else
         StringCchPrintfW(msg, cap, L"AmneziaWG не запустился: ошибка Windows %lu.\n\n"
-                         L"Подробности — в журнале службы: amneziawg\\amneziawg.exe /dumplog",
+                         L"Подробности — в журнале службы: core\\amneziawg\\amneziawg.exe /dumplog",
                          (unsigned long)win32);
 }
 
@@ -279,7 +295,7 @@ int awgsvc_start(const char *conf, wchar_t *msg, size_t cap)
     scm = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT | SC_MANAGER_CREATE_SERVICE);
     if (!scm) { say(msg, cap, L"Нет доступа к диспетчеру служб Windows"); goto out; }
 
-    svc = OpenServiceW(scm, SERVICE, SERVICE_ALL_ACCESS);
+    svc = OpenServiceW(scm, SERVICE, AWG_SVC_ACCESS);
     if (svc) {
         if (service_is_ours(svc) != 1) {
             say(msg, cap, L"Служба с именем AmneziaWGTunnel$utgard-awg уже есть и принадлежит "
@@ -326,7 +342,7 @@ int awgsvc_start(const char *conf, wchar_t *msg, size_t cap)
     /* As amneziawg.exe itself installs a tunnel (manager/install.go), but
        started on demand: nothing of ours runs at the next boot. */
     svc = CreateServiceW(scm, SERVICE, L"AmneziaWG Tunnel: " TUNNEL L" (Utgard)",
-                         SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_DEMAND_START,
+                         AWG_SVC_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_DEMAND_START,
                          SERVICE_ERROR_NORMAL, bin, NULL, NULL, L"Nsi\0TcpIp\0", NULL, NULL);
     if (!svc) { say(msg, cap, L"Не удалось создать службу AmneziaWG"); goto out; }
     created = 1;
@@ -446,7 +462,7 @@ int awgsvc_stop(wchar_t *msg, size_t cap)
     if (msg && cap) msg[0] = L'\0';
     scm = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT);
     if (!scm) return say(msg, cap, L"Нет доступа к диспетчеру служб Windows");
-    svc = OpenServiceW(scm, SERVICE, SERVICE_ALL_ACCESS);
+    svc = OpenServiceW(scm, SERVICE, AWG_SVC_ACCESS);
     if (svc) {
         if (service_is_ours(svc) != 1) CloseServiceHandle(svc);
         else if (!remove_service(scm, svc)) ok = say(msg, cap, L"Служба AmneziaWG не удалилась вовремя");

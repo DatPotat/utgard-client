@@ -232,16 +232,14 @@ int subscription_apply(HWND hwnd, const wchar_t *url,
 void act_subscription(HWND hwnd)
 {
     wchar_t  url[2048];
-    wchar_t  current[PROFILE_SRC];
     sub_job *job;
     HANDLE   th;
 
     /* A job may be switching profiles by index: no renumbering meanwhile. */
     if (g_sub_busy || g_busy) return;
 
-    /* The field starts empty (Anton, 2026-09-28): the old address stays in
-       use until a new one is entered, and is not put in front of the user. */
-    (void)current;
+    /* The field starts empty: the old address stays in use until a new one
+       is entered, and is not put in front of the user. */
     if (!ask_string(hwnd, L"Подписка",
                     L"Адрес подписки — серверы из неё будут обновляться целиком, "
                     L"добавленные вручную останутся",
@@ -614,7 +612,7 @@ static int plan_prepare(vpn_inputs *v, int which, wchar_t *msg, size_t cap)
         pac_store settings;
         int i;
         if (!pacstore_load(&settings)) {
-            StringCchCopyW(msg, cap, L"Не удалось прочитать pac.json. Исправьте настройки PAC перед включением VPN.");
+            StringCchCopyW(msg, cap, L"Не удалось прочитать настройки PAC. Исправьте их перед включением VPN.");
             return 0;
         }
         for (i = 0; i < settings.count; i++)
@@ -973,31 +971,6 @@ static void profile_add_link(HWND hwnd)
     profile_add_parsed(hwnd, &parsed);
 }
 
-static int pick_conf(HWND owner, wchar_t *out, size_t cap)
-{
-    static const COMDLG_FILTERSPEC types[] = {
-        { L"Конфигурация WireGuard (*.conf)", L"*.conf" },
-        { L"Все файлы", L"*.*" }
-    };
-    IFileDialog *fd   = NULL;
-    IShellItem  *item = NULL;
-    PWSTR        wide = NULL;
-    int          ok   = 0;
-
-    if (FAILED(CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER,
-                                &IID_IFileDialog, (void **)&fd)))
-        return 0;
-    IFileDialog_SetFileTypes(fd, 2, types);
-    IFileDialog_SetTitle(fd, L"Файл WireGuard");
-    if (SUCCEEDED(IFileDialog_Show(fd, owner)) &&
-        SUCCEEDED(IFileDialog_GetResult(fd, &item)) &&
-        SUCCEEDED(IShellItem_GetDisplayName(item, SIGDN_FILESYSPATH, &wide)))
-        ok = SUCCEEDED(StringCchCopyW(out, cap, wide));
-    if (wide) CoTaskMemFree(wide);
-    if (item) IShellItem_Release(item);
-    IFileDialog_Release(fd);
-    return ok;
-}
 
 /* wg-quick configuration: the file name, without .conf, names the profile. */
 static void profile_add_wgconf(HWND hwnd)
@@ -1009,7 +982,7 @@ static void profile_add_wgconf(HWND hwnd)
     link_profile  parsed;
     const wchar_t *base, *dot;
 
-    if (!pick_conf(hwnd, path, MAX_PATH)) return;
+    if (!pick_file(hwnd, L"Файл WireGuard", L"Конфигурация WireGuard (*.conf)", L"*.conf", path, MAX_PATH)) return;
     if (file_read(path, text, sizeof text - 1, &got) != 1) {
         problem(hwnd, L"Не удалось прочитать файл (или он больше 64 КБ)");
         return;

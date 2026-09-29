@@ -18,7 +18,8 @@ typedef struct {
 typedef struct {
     const wchar_t *title;       /* shown to the user */
     const wchar_t *version;
-    const wchar_t *dir;         /* folder beside utgard.exe */
+    const wchar_t *dir;         /* folder under the app folder: core\<name> */
+    const wchar_t *old_dir;     /* where versions before 2.3.2 kept it */
     const wchar_t *archive;     /* file name of the official download */
     const wchar_t *url;
     const wchar_t *archive_sha256;

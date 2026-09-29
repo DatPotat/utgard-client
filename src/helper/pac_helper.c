@@ -103,6 +103,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     pacproc_ready ready; pacproc_init init; pacproc_command command; pac_script *scripts[PAC_ITEMS_MAX] = { 0 };
     genconf_input in; int i, count = 0, result = 1;
     (void)instance; (void)previous; (void)show;
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);   /* runtime DLL loads: System32 only */
     ZeroMemory(&ready, sizeof ready); ready.magic = PACPROC_MAGIC; ready.security_state = (unsigned short)security_state();
     if (swscanf(command_line, L"%llu %llu", &r, &c) != 2) return 2;
     ready_pipe = (HANDLE)(UINT_PTR)r; command_pipe = (HANDLE)(UINT_PTR)c; ZeroMemory(&in, sizeof in);

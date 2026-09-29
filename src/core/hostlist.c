@@ -8,6 +8,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Bounded copy (see lists.c): memcpy with an explicit capacity. */
+static void copy_bounded(char *dst, size_t cap, const char *src)
+{
+    size_t n = strlen(src);
+    if (!cap) return;
+    if (n >= cap) n = cap - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
 static char lower(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c; }
 
 /* Copies line `from` (up to \n) into buf, trimmed, without a # comment.
@@ -156,7 +166,7 @@ int hostlist_add(const char *text, const char *paste, int zapret,
     memset(pv, 0, sizeof *pv);
     for (p = text; p && *p && n < LIST_MAX;) {
         p = next_line(p, buf, sizeof buf);
-        if (buf[0] && key_of(buf, zapret, key, sizeof key) == 1) strcpy(set[n++], key);
+        if (buf[0] && key_of(buf, zapret, key, sizeof key) == 1) copy_bounded(set[n++], LIST_ENTRY_MAX, key);
     }
     if (out) {
         len = strlen(text);
@@ -179,7 +189,7 @@ int hostlist_add(const char *text, const char *paste, int zapret,
         if (dup) { pv->duplicate++; continue; }
         if (covered(key, set, n, zapret)) { pv->covered++; continue; }
         if (n >= LIST_MAX) return 0;
-        strcpy(set[n++], key);
+        copy_bounded(set[n++], LIST_ENTRY_MAX, key);
         pv->added++;
         if (out) {
             size_t k = strlen(key);

@@ -14,19 +14,6 @@ static wchar_t unreadable_path[2048];
 static SRWLOCK notice_lock = SRWLOCK_INIT;
 _Static_assert(sizeof(wchar_t) == sizeof(uint16_t), "Windows UTF-16 required");
 
-static int protect_blob(const BYTE *plain, DWORD plain_size, char out[16384])
-{
-    DATA_BLOB in, entropy, encrypted; DWORD chars = 16384; int ok = 0;
-    ZeroMemory(&encrypted, sizeof encrypted); in.pbData = (BYTE *)plain; in.cbData = plain_size;
-    entropy.pbData = (BYTE *)PAC_DPAPI_SALT; entropy.cbData = (DWORD)(sizeof PAC_DPAPI_SALT - 1);
-    if (CryptProtectData(&in, L"utgard PAC source", &entropy, NULL, NULL, CRYPTPROTECT_UI_FORBIDDEN, &encrypted)) {
-        ok = CryptBinaryToStringA(encrypted.pbData, encrypted.cbData,
-             CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, out, &chars) != 0;
-        SecureZeroMemory(encrypted.pbData, encrypted.cbData); LocalFree(encrypted.pbData);
-    }
-    return ok;
-}
-
 static int unprotect_blob(const char *encoded, BYTE **data, DWORD *size)
 {
     DATA_BLOB in, entropy, plain; BYTE encrypted[12288]; DWORD bytes = sizeof encrypted; int ok = 0;
@@ -39,7 +26,7 @@ static int unprotect_blob(const char *encoded, BYTE **data, DWORD *size)
     SecureZeroMemory(encrypted, sizeof encrypted); return ok;
 }
 
-static int store_path(wchar_t path[1024])
+static int legacy_path(wchar_t path[1024])
 {
     wchar_t *slash; DWORD n = GetModuleFileNameW(NULL, path, 1024);
     if (!n || n >= 1024 || !(slash = wcsrchr(path, L'\\'))) return 0;
@@ -81,11 +68,12 @@ static void set_aside(const wchar_t *path)
     ReleaseSRWLockExclusive(&notice_lock);
 }
 
-int pacstore_load(pac_store *s)
+/* pac.json of versions before 2.3.2 (format 3), read once to move it. */
+static int legacy_load(pac_store *s)
 {
     wchar_t path[1024]; char *buffer; JSON_Value *v = NULL; JSON_Object *root; JSON_Array *items;
     size_t i, count; int ok = 0, version;
-    ZeroMemory(s, sizeof *s); if (save_blocked) return 1; if (!store_path(path)) return 0;
+    ZeroMemory(s, sizeof *s); if (save_blocked) return 1; if (!legacy_path(path)) return 0;
     if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND) return 1;
     buffer = (char *)malloc(PAC_STORE_MAX + 1u); if (!buffer) return 0;
     if (file_read(path, buffer, PAC_STORE_MAX + 1u, NULL) != 1) { free(buffer); set_aside(path); return 1; }
@@ -102,29 +90,6 @@ done:
     json_value_free(v); return ok;
 }
 
-int pacstore_save(const pac_store *s)
-{
-    wchar_t path[1024]; JSON_Value *root, *list; char *text = NULL; int i, ok = 0;
-    if (save_blocked || !s || s->count < 0 || s->count > PAC_ITEMS_MAX || !store_path(path)) return 0;
-    root = json_value_init_object(); list = json_value_init_array();
-    if (!root || !list) { json_value_free(root); json_value_free(list); return 0; }
-    for (i = 0; i < s->count; i++) {
-        unsigned char plain[33 + 2048 * 2]; char encoded[16384]; size_t length, plain_size, units;
-        JSON_Value *value; JSON_Object *item;
-        if (!s->items[i].text || !(length = strlen(s->items[i].text)) || length > PAC_MAX) goto done;
-        units = wcslen(s->items[i].source) + 1;
-        plain_size = pacblob_pack(s->items[i].text, length, (const uint16_t *)s->items[i].source, units, plain, sizeof plain);
-        if (!plain_size || !protect_blob(plain, (DWORD)plain_size, encoded)) { SecureZeroMemory(plain, sizeof plain); goto done; }
-        SecureZeroMemory(plain, sizeof plain); value = json_value_init_object(); if (!value) goto done; item = json_value_get_object(value);
-        json_object_set_string(item, "source_protected", encoded); SecureZeroMemory(encoded, sizeof encoded);
-        json_object_set_string(item, "script", s->items[i].text); json_object_set_boolean(item, "enabled", s->items[i].enabled);
-        if (json_array_append_value(json_value_get_array(list), value) != JSONSuccess) { json_value_free(value); goto done; }
-    }
-    json_object_set_number(json_value_get_object(root), "version", 3); json_object_set_value(json_value_get_object(root), "items", list); list = NULL;
-    text = json_serialize_to_string(root); ok = text && file_write(path, text, strlen(text));
-done:
-    json_free_serialized_string(text); json_value_free(list); json_value_free(root); return ok;
-}
 
 int pacstore_unreadable_notice(wchar_t *path, size_t cap)
 {
@@ -141,3 +106,109 @@ void pacstore_free(pac_store *s)
 }
 int pacstore_enabled(const pac_store *s)
 { int i; for (i = 0; s && i < s->count; i++) if (s->items[i].enabled) return 1; return 0; }
+
+/* ---- one PAC per file: list\pac\01.pac .. 08.pac (from 2.3.2) ------------ */
+
+#define PAC_FILE_MAX (PAC_MAX + 2 * PAC_BLOB_SOURCE_MAX + 64u * 1024u)
+
+static int item_path(int n, wchar_t path[1024])
+{
+    wchar_t *slash; DWORD len = GetModuleFileNameW(NULL, path, 1024);
+    if (!len || len >= 1024 || !(slash = wcsrchr(path, L'\\'))) return 0;
+    if (n == 0) return SUCCEEDED(StringCchCopyW(slash + 1, 1024 - (slash + 1 - path), L"list\\pac"));
+    return SUCCEEDED(StringCchPrintfW(slash + 1, 1024 - (slash + 1 - path), L"list\\pac\\%02d.pac", n));
+}
+
+/* One file into one item; the file is set aside when it cannot be read. */
+static int load_file(const wchar_t *path, pac_item *item)
+{
+    BYTE *raw = (BYTE *)malloc(PAC_FILE_MAX); size_t got = 0; DATA_BLOB in, entropy, plain;
+    const unsigned char *script; size_t script_length, units; int enabled, ok = 0, rd;
+    if (!raw) return 0;
+    rd = file_read(path, raw, PAC_FILE_MAX, &got);
+    ZeroMemory(&plain, sizeof plain);
+    in.pbData = raw; in.cbData = (DWORD)got;
+    entropy.pbData = (BYTE *)PAC_DPAPI_SALT; entropy.cbData = (DWORD)(sizeof PAC_DPAPI_SALT - 1);
+    if (rd == 1 && got && CryptUnprotectData(&in, NULL, &entropy, NULL, NULL, CRYPTPROTECT_UI_FORBIDDEN, &plain)) {
+        if (pacitem_unpack(plain.pbData, plain.cbData, PAC_MAX, &enabled, (uint16_t *)item->source, 2048,
+                           &units, &script, &script_length) &&
+            (item->text = (char *)malloc(script_length + 1)) != NULL) {
+            memcpy(item->text, script, script_length);
+            item->text[script_length] = '\0';
+            item->enabled = enabled;
+            ok = 1;
+        }
+        SecureZeroMemory(plain.pbData, plain.cbData);
+        LocalFree(plain.pbData);
+    }
+    free(raw);
+    if (!ok) set_aside(path);
+    return ok;
+}
+
+static int load_dir(pac_store *s, int *files)
+{
+    int k; wchar_t path[1024];
+    *files = 0;
+    for (k = 1; k <= PAC_ITEMS_MAX; k++) {
+        if (!item_path(k, path)) return 0;
+        if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) continue;
+        (*files)++;
+        if (load_file(path, &s->items[s->count])) s->count++;
+    }
+    return 1;
+}
+
+int pacstore_load(pac_store *s)
+{
+    wchar_t old[1024]; int files;
+    ZeroMemory(s, sizeof *s);
+    if (save_blocked) return 1;
+    if (!load_dir(s, &files)) return 0;
+    if (files || !legacy_path(old) || GetFileAttributesW(old) == INVALID_FILE_ATTRIBUTES) return 1;
+    /* Moving pac.json: read it the old way, write the files, read them back
+       and compare, and only then delete it. Anything short of that keeps
+       pac.json where it is. An unreadable pac.json is set aside as before. */
+    if (!legacy_load(s) || !s->count) return 1;
+    if (pacstore_save(s)) {
+        pac_store check; int n, same;
+        ZeroMemory(&check, sizeof check);
+        same = load_dir(&check, &n) && check.count == s->count;
+        for (n = 0; same && n < s->count; n++)
+            same = check.items[n].enabled == s->items[n].enabled &&
+                   !wcscmp(check.items[n].source, s->items[n].source) &&
+                   !strcmp(check.items[n].text, s->items[n].text);
+        pacstore_free(&check);
+        if (same) DeleteFileW(old);
+    }
+    return 1;
+}
+
+int pacstore_save(const pac_store *s)
+{
+    wchar_t path[1024]; int i, ok = 1;
+    if (save_blocked || !s || s->count < 0 || s->count > PAC_ITEMS_MAX || !item_path(0, path)) return 0;
+    CreateDirectoryW(path, NULL);
+    for (i = 0; ok && i < s->count; i++) {
+        size_t length = s->items[i].text ? strlen(s->items[i].text) : 0, units = wcslen(s->items[i].source) + 1, n;
+        size_t cap = 4 + units * 2 + 4 + length;
+        unsigned char *plain;
+        DATA_BLOB in, entropy, out;
+        if (!length || length > PAC_MAX || !(plain = (unsigned char *)malloc(cap))) { ok = 0; break; }
+        n = pacitem_pack(s->items[i].enabled, (const uint16_t *)s->items[i].source, units,
+                         s->items[i].text, length, plain, cap);
+        ZeroMemory(&out, sizeof out);
+        in.pbData = plain; in.cbData = (DWORD)n;
+        entropy.pbData = (BYTE *)PAC_DPAPI_SALT; entropy.cbData = (DWORD)(sizeof PAC_DPAPI_SALT - 1);
+        ok = n && item_path(i + 1, path) &&
+             CryptProtectData(&in, L"utgard PAC", &entropy, NULL, NULL, CRYPTPROTECT_UI_FORBIDDEN, &out) &&
+             file_write(path, out.pbData, out.cbData);
+        if (out.pbData) { SecureZeroMemory(out.pbData, out.cbData); LocalFree(out.pbData); }
+        SecureZeroMemory(plain, cap);
+        free(plain);
+    }
+    /* Files past the last PAC belong to ones since removed. */
+    for (i = s->count + 1; ok && i <= PAC_ITEMS_MAX; i++)
+        if (item_path(i, path)) DeleteFileW(path);
+    return ok;
+}

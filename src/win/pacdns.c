@@ -73,7 +73,8 @@ static void remember(const unsigned char *packet, int length)
             }
             memcpy(cache[slot].ip, packet + at, bytes); cache[slot].family = bytes;
             StringCchCopyA(cache[slot].name, 256, name);
-            cache[slot].until = GetTickCount64() + (ULONGLONG)ttl * 1000;
+            /* A day at most: a huge TTL must not pin an answer for the session. */
+            cache[slot].until = GetTickCount64() + (ULONGLONG)(ttl > 86400 ? 86400 : ttl) * 1000;
             cache[slot].serial = ++serial;
             ReleaseSRWLockExclusive(&cache_lock);
         }

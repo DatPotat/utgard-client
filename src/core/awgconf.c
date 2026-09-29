@@ -73,8 +73,11 @@ int awgconf_build(const link_profile *p, const char *endpoint_ip,
         while (*q) {
             size_t k = strcspn(q, ",");
             if (k && !memchr(q, ':', k) && strlen(v4) + k + 2 < sizeof v4) {
-                if (v4[0]) strcat(v4, ", ");
-                strncat(v4, q, k);
+                /* Room checked above; appended by length, no strcat. */
+                size_t have = strlen(v4);
+                if (have) { memcpy(v4 + have, ", ", 2); have += 2; }
+                memcpy(v4 + have, q, k);
+                v4[have + k] = '\0';
             }
             q += k;
             if (*q == ',') q++;

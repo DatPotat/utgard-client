@@ -35,7 +35,7 @@
 #define SB_LICENSE_SHA L"bb3805862b583aee73ad6f7805ec634747a37257a637a3069857843f05ea589c"
 
 const core_desc CORE_SINGBOX = {
-    L"sing-box", SB_VERSION, L"sing-box", SB_ARCHIVE,
+    L"sing-box", SB_VERSION, L"core\\sing-box", L"sing-box", SB_ARCHIVE,
     L"https://github.com/SagerNet/sing-box/releases/download/v" SB_VERSION L"/" SB_ARCHIVE,
     SB_ZIP_SHA,
     { { L"sing-box.exe", SB_EXE_SHA, 1 },
@@ -47,7 +47,7 @@ const core_desc CORE_SINGBOX = {
 };
 
 const core_desc CORE_AWG = {
-    L"AmneziaWG", AWG_VERSION, L"amneziawg", AWG_ARCHIVE,
+    L"AmneziaWG", AWG_VERSION, L"core\\amneziawg", L"amneziawg", AWG_ARCHIVE,
     L"https://github.com/amnezia-vpn/amneziawg-windows-client/releases/download/"
         AWG_VERSION L"/" AWG_ARCHIVE,
     AWG_MSI_SHA,
