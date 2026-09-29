@@ -31,8 +31,14 @@ sing-box 1.14.1
   https://github.com/SagerNet/sing-box/releases/tag/v1.14.1
   and verifies it against SHA-256 checksums built into utgard.exe.
   sing-box runs as a separate program; it is not linked into utgard.exe.
-  License: GPL-3.0-or-later. The LICENSE file from the official archive is
-  unpacked next to sing-box.exe in the sing-box folder.
+  License: GPL-3.0-or-later, with this additional term in the project's
+  LICENSE file:
+    In addition, no derivative work may use the name or imply association
+    with this application without prior consent.
+  Utgard is not a derivative work of sing-box and is not associated with
+  it; the name appears here only to identify the component.
+  The LICENSE file from the official archive is unpacked next to
+  sing-box.exe in the core\sing-box folder.
   Source: https://github.com/SagerNet/sing-box/tree/v1.14.1
   libcronet.dll arrives in the same official archive; Utgard does not
   redistribute it.
@@ -43,7 +49,7 @@ AmneziaWG for Windows 3.1.0 (amneziawg-windows-client)
   https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/3.1.0
   verifies it against SHA-256 checksums built into utgard.exe, unpacks it
   without installing (msiexec /a) and keeps only amneziawg.exe and
-  wintun.dll in the amneziawg folder. amneziawg.exe runs as a separate
+  wintun.dll in the core\amneziawg folder. amneziawg.exe runs as a separate
   program (a Windows service for the duration of a session); it is not
   linked into utgard.exe.
   License: MIT (amneziawg-windows-client, amneziawg-windows, amneziawg-go).

@@ -77,10 +77,10 @@ static DWORD WINAPI ping_thread(LPVOID param)
         int ms = net_probe(job->target[i].server, job->target[i].port,
                            job->target[i].icmp, 1500);
         PostMessageW(job->hwnd, WM_APP_PING_ONE,
-                     (WPARAM)((job->gen << 8) | (i & 0xFF)), (LPARAM)ms);
+                     ((WPARAM)(unsigned)job->gen << 8) | (WPARAM)(i & 0xFF), (LPARAM)ms);
     }
 
-    PostMessageW(job->hwnd, WM_APP_PING_DONE, (WPARAM)job->gen, 0);
+    PostMessageW(job->hwnd, WM_APP_PING_DONE, (WPARAM)(unsigned)job->gen, 0);
     free(job);
     return 0;
 }
@@ -98,7 +98,7 @@ void ping_start(HWND hwnd)
     job = (ping_job *)calloc(1, sizeof *job);
     if (!job) return;
     job->hwnd  = hwnd;
-    job->gen   = g_ping_gen & 0xFF;
+    job->gen   = g_ping_gen;   /* whole: WPARAM is 64-bit on x64 and arm64 */
     job->count = g_prof.count;
     for (i = 0; i < g_prof.count; i++) {
         StringCchCopyA(job->target[i].server, 256, g_prof.items[i].link.server);

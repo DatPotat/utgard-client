@@ -54,11 +54,13 @@ static int load_item(JSON_Object *o, pac_item *item)
     return 1;
 }
 
+/* path NULL: the file stays where it is (it may be fine, memory ran out),
+   so saving is blocked for the session instead - as when the move fails. */
 static void set_aside(const wchar_t *path)
 {
     SYSTEMTIME t; wchar_t aside[2048]; int moved;
     GetLocalTime(&t);
-    moved = SUCCEEDED(StringCchPrintfW(aside, 2048, L"%s.unreadable-%04u%02u%02u-%02u%02u%02u",
+    moved = path && SUCCEEDED(StringCchPrintfW(aside, 2048, L"%s.unreadable-%04u%02u%02u-%02u%02u%02u",
         path, t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond)) &&
         MoveFileExW(path, aside, MOVEFILE_WRITE_THROUGH);
     AcquireSRWLockExclusive(&notice_lock);
@@ -73,7 +75,9 @@ static int legacy_load(pac_store *s)
 {
     wchar_t path[1024]; char *buffer; JSON_Value *v = NULL; JSON_Object *root; JSON_Array *items;
     size_t i, count; int ok = 0, version;
-    ZeroMemory(s, sizeof *s); if (save_blocked) return 1; if (!legacy_path(path)) return 0;
+    ZeroMemory(s, sizeof *s);
+    if (save_blocked) return 1;
+    if (!legacy_path(path)) return 0;
     if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND) return 1;
     buffer = (char *)malloc(PAC_STORE_MAX + 1u); if (!buffer) return 0;
     if (file_read(path, buffer, PAC_STORE_MAX + 1u, NULL) != 1) { free(buffer); set_aside(path); return 1; }
@@ -94,7 +98,10 @@ done:
 int pacstore_unreadable_notice(wchar_t *path, size_t cap)
 {
     int pending; AcquireSRWLockExclusive(&notice_lock); pending = notice_pending;
-    if (pending) { if (path && cap) StringCchCopyW(path, cap, unreadable_path); notice_pending = 0; }
+    if (pending) {
+        if (path && cap) StringCchCopyW(path, cap, unreadable_path);
+        notice_pending = 0;
+    }
     ReleaseSRWLockExclusive(&notice_lock); return pending;
 }
 
@@ -105,7 +112,12 @@ void pacstore_free(pac_store *s)
     ZeroMemory(s, sizeof *s);
 }
 int pacstore_enabled(const pac_store *s)
-{ int i; for (i = 0; s && i < s->count; i++) if (s->items[i].enabled) return 1; return 0; }
+{
+    int i;
+    for (i = 0; s && i < s->count; i++)
+        if (s->items[i].enabled) return 1;
+    return 0;
+}
 
 /* ---- one PAC per file: list\pac\01.pac .. 08.pac (from 2.3.2) ------------ */
 
@@ -123,26 +135,27 @@ static int item_path(int n, wchar_t path[1024])
 static int load_file(const wchar_t *path, pac_item *item)
 {
     BYTE *raw = (BYTE *)malloc(PAC_FILE_MAX); size_t got = 0; DATA_BLOB in, entropy, plain;
-    const unsigned char *script; size_t script_length, units; int enabled, ok = 0, rd;
-    if (!raw) return 0;
+    const unsigned char *script; size_t script_length, units; int enabled, ok = 0, rd, oom = 0;
+    if (!raw) { set_aside(NULL); return 0; }
     rd = file_read(path, raw, PAC_FILE_MAX, &got);
     ZeroMemory(&plain, sizeof plain);
     in.pbData = raw; in.cbData = (DWORD)got;
     entropy.pbData = (BYTE *)PAC_DPAPI_SALT; entropy.cbData = (DWORD)(sizeof PAC_DPAPI_SALT - 1);
     if (rd == 1 && got && CryptUnprotectData(&in, NULL, &entropy, NULL, NULL, CRYPTPROTECT_UI_FORBIDDEN, &plain)) {
         if (pacitem_unpack(plain.pbData, plain.cbData, PAC_MAX, &enabled, (uint16_t *)item->source, 2048,
-                           &units, &script, &script_length) &&
-            (item->text = (char *)malloc(script_length + 1)) != NULL) {
-            memcpy(item->text, script, script_length);
-            item->text[script_length] = '\0';
-            item->enabled = enabled;
-            ok = 1;
+                           &units, &script, &script_length)) {
+            if ((item->text = (char *)malloc(script_length + 1)) != NULL) {
+                memcpy(item->text, script, script_length);
+                item->text[script_length] = '\0';
+                item->enabled = enabled;
+                ok = 1;
+            } else oom = 1;
         }
         SecureZeroMemory(plain.pbData, plain.cbData);
         LocalFree(plain.pbData);
     }
     free(raw);
-    if (!ok) set_aside(path);
+    if (!ok) set_aside(oom ? NULL : path);
     return ok;
 }
 

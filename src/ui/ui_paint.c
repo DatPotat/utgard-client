@@ -138,7 +138,8 @@ static void paint_pac(HDC dc, const RECT *c)
     int w = c->right - PAD * 2;
     int problems = g_vpn_on && g_pac_status_valid &&
                    (g_pac_status.evaluation_errors || g_pac_status.worker_cap_hits ||
-                    g_pac_status.dns_cap_hits || g_pac_status.udp_evictions);
+                    g_pac_status.dns_cap_hits || g_pac_status.udp_evictions ||
+                    g_pac_status.udp_owner_foreign);
     wchar_t status[160], detail[320];
     /* First line: the state, short enough to fit beside the title. */
     if (g_vpn_on && g_pac_status_valid)
@@ -178,6 +179,12 @@ static void paint_pac(HDC dc, const RECT *c)
                              (unsigned long long)g_pac_status.dns_cap_hits,
                              (unsigned long long)g_pac_status.udp_evictions);
             StringCchCatW(detail, 320, caps);
+        }
+        if (g_pac_status.udp_owner_foreign) {
+            wchar_t foreign[96];
+            StringCchPrintfW(foreign, 96, L" · чужих UDP-пакетов отброшено: %llu",
+                             (unsigned long long)g_pac_status.udp_owner_foreign);
+            StringCchCatW(detail, 320, foreign);
         }
     } else {
         StringCchCopyW(detail, 320, L"Если хоть один PAC отвечает прокси, соединение идёт через VPN.");

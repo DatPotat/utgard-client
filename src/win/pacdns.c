@@ -30,7 +30,11 @@ static int dns_name(const unsigned char *p, size_t size, size_t *at, char name[2
     size_t pos = *at, written = 0; int jumps = 0, indirect = 0;
     while (pos < size) {
         unsigned n = p[pos++];
-        if (!n) { if (!indirect) *at = pos; name[written] = 0; return written != 0; }
+        if (!n) {
+            if (!indirect) *at = pos;
+            name[written] = 0;
+            return written != 0;
+        }
         if ((n & 0xc0) == 0xc0) {
             if (pos >= size || ++jumps > 16) return 0;
             if (!indirect) *at = pos + 1;
@@ -121,7 +125,12 @@ static void evaluation_leave(const char *name)
 static int io(SOCKET s, void *buffer, int n, int writing)
 {
     char *p = (char *)buffer;
-    while (n > 0) { int k = writing ? send(s, p, n, 0) : recv(s, p, n, 0); if (k <= 0) return 0; p += k; n -= k; }
+    while (n > 0) {
+        int k = writing ? send(s, p, n, 0) : recv(s, p, n, 0);
+        if (k <= 0) return 0;
+        p += k;
+        n -= k;
+    }
     return 1;
 }
 static void timeouts(SOCKET s) { DWORD ms = 3000; setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&ms, sizeof ms); setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&ms, sizeof ms); }
@@ -132,7 +141,12 @@ static DWORD WINAPI answer(void *arg)
     dns_job *j = (dns_job *)arg; SOCKET upstream = INVALID_SOCKET;
     unsigned char prefix[2], id[2]; int length = j->length, target_vpn = 0, entered = 0;
     char name[256] = {0}; size_t at = 12; unsigned qtype = 0; struct sockaddr_in target;
-    if (j->tcp) { timeouts(j->client); if (!io(j->client, prefix, 2, 0)) goto done; length = get16(prefix); if (length < 12 || !io(j->client, j->packet, length, 0)) goto done; }
+    if (j->tcp) {
+        timeouts(j->client);
+        if (!io(j->client, prefix, 2, 0)) goto done;
+        length = get16(prefix);
+        if (length < 12 || !io(j->client, j->packet, length, 0)) goto done;
+    }
     if (length < 12 || j->packet[2] & 0x80) goto done;
     memcpy(id, j->packet, 2);
     if (get16(j->packet + 4) == 1 && dns_name(j->packet, length, &at, name) && at + 4 <= (size_t)length) {
@@ -150,8 +164,12 @@ static DWORD WINAPI answer(void *arg)
     timeouts(upstream); if (connect(upstream, (struct sockaddr *)&target, sizeof target)) goto done;
     if (j->tcp && !io(upstream, prefix, 2, 1)) goto done;
     if (!io(upstream, j->packet, length, 1)) goto done;
-    if (j->tcp) { if (!io(upstream, prefix, 2, 0)) goto done; length = get16(prefix); if (length < 12 || !io(upstream, j->packet, length, 0)) goto done; }
-    else length = recv(upstream, (char *)j->packet, sizeof j->packet, 0);
+    if (j->tcp) {
+        if (!io(upstream, prefix, 2, 0)) goto done;
+        length = get16(prefix);
+        if (length < 12 || !io(upstream, j->packet, length, 0)) goto done;
+    } else
+        length = recv(upstream, (char *)j->packet, sizeof j->packet, 0);
     if (length < 12 || memcmp(id, j->packet, 2)) goto done;
     remember(j->packet, length);
     if (j->tcp) { if (io(j->client, prefix, 2, 1)) io(j->client, j->packet, length, 1); }
@@ -174,9 +192,21 @@ static DWORD WINAPI accept_dns(void *arg)
         if (l.tcp) j->client = accept(l.socket, NULL, NULL);
         else { j->client = l.socket; size = sizeof j->peer; j->length = recvfrom(l.socket, (char *)j->packet, sizeof j->packet, 0, (struct sockaddr *)&j->peer, &size); if (j->length < 12) { free(j); continue; } }
         if (j->client == INVALID_SOCKET) { free(j); break; }
-        if (InterlockedIncrement(&jobs) > DNS_JOBS_MAX) { pacstatus_dns_cap(); InterlockedDecrement(&jobs); if (j->tcp) closesocket(j->client); free(j); continue; }
+        if (InterlockedIncrement(&jobs) > DNS_JOBS_MAX) {
+            pacstatus_dns_cap();
+            InterlockedDecrement(&jobs);
+            if (j->tcp) closesocket(j->client);
+            free(j);
+            continue;
+        }
         thread = CreateThread(NULL, 0, answer, j, 0, NULL);
-        if (thread) CloseHandle(thread); else { InterlockedDecrement(&jobs); if (j->tcp) closesocket(j->client); free(j); }
+        if (thread)
+            CloseHandle(thread);
+        else {
+            InterlockedDecrement(&jobs);
+            if (j->tcp) closesocket(j->client);
+            free(j);
+        }
     }
     closesocket(l.socket); return 0;
 }

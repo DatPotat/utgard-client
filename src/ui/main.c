@@ -726,7 +726,6 @@ exc_check_start(hwnd);
     SetTimer(hwnd, TIMER_STATUS, 2000, NULL);
     layout(hwnd);
     return 0;
-    return 0;
 }
 
 /* WM_COMMAND: buttons, lists and menu items. */
@@ -916,7 +915,6 @@ static LRESULT on_command(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (HIWORD(wp) == LBN_DBLCLK)        act_start(hwnd, NULL);
         else if (HIWORD(wp) == LBN_SELCHANGE) layout(hwnd);
         return 0;
-    default: return 0;
     }
     return 0;
 }
@@ -924,9 +922,8 @@ static LRESULT on_command(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 /* WM_APP_INSTALL: a core download finished. */
 static LRESULT on_install_done(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
-    (void)msg; (void)wp; (void)lp;
-{
     install_job *job = (install_job *)lp;
+    (void)msg; (void)wp;
 
     g_installing = 0;
     if (!job->ok && !job->awg) g_awg_after_singbox = 0;   /* nothing to follow */
@@ -952,8 +949,6 @@ static LRESULT on_install_done(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             offer_awg_download(hwnd);
         }
     }
-    return 0;
-}
     return 0;
 }
 
@@ -995,7 +990,6 @@ static LRESULT on_timer(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
     /* An AmneziaWG tunnel with the VPN off is left over: stop it. */
     vpn_reap_orphan(hwnd);
-    return 0;
     return 0;
 }
 
@@ -1102,9 +1096,9 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
 
     case WM_APP_PING_ONE: {
-        int gen = (int)(wp >> 8);
-        int idx = (int)(wp & 0xFF);
-        if (gen == (g_ping_gen & 0xFF) && idx >= 0 && idx < PROFILES_MAX) {
+        unsigned gen = (unsigned)(wp >> 8);
+        int      idx = (int)(wp & 0xFF);
+        if (gen == (unsigned)g_ping_gen && idx < PROFILES_MAX) {
             g_ping[idx] = (int)lp;
             InvalidateRect(g_plist, NULL, TRUE);
         }
@@ -1112,7 +1106,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
 
     case WM_APP_PING_DONE:
-        if ((int)wp == (g_ping_gen & 0xFF)) g_ping_busy = 0;
+        if ((unsigned)wp == (unsigned)g_ping_gen) g_ping_busy = 0;
         layout(hwnd);               /* re-enables the refresh button too */
         return 0;
 

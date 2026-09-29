@@ -59,6 +59,10 @@ void pacstatus_evaluation_error(DWORD error)
 COUNTER(pacstatus_worker_cap, worker_cap_hits)
 COUNTER(pacstatus_dns_cap, dns_cap_hits)
 COUNTER(pacstatus_udp_evict, udp_evictions)
+COUNTER(pacstatus_udp_verified, udp_owner_verified)
+COUNTER(pacstatus_udp_no_table, udp_owner_no_table)
+COUNTER(pacstatus_udp_not_listed, udp_owner_not_listed)
+COUNTER(pacstatus_udp_foreign, udp_owner_foreign)
 
 static int status_path(wchar_t path[1024])
 {

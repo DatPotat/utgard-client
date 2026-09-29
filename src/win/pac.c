@@ -172,7 +172,10 @@ int pac_query(pac_script *p, const wchar_t *url, DWORD *error)
     DWORD e;
     int decision = -1;
     q = (query *)calloc(1, sizeof *q);
-    if (!q) { if (error) *error = ERROR_NOT_ENOUGH_MEMORY; return -1; }
+    if (!q) {
+        if (error) *error = ERROR_NOT_ENOUGH_MEMORY;
+        return -1;
+    }
     q->refs = 1;
     q->decision = -1;
     q->done = CreateEventW(NULL, TRUE, FALSE, NULL);

@@ -25,13 +25,26 @@ static void sha_init(sha256_ctx *c) { static const uint32_t h[8]={0x6a09e667,0xb
 static void sha_update(sha256_ctx *c, const void *data, size_t n)
 {
     const unsigned char *p=(const unsigned char *)data; c->bits+=(uint64_t)n*8;
-    while(n){size_t take=64-c->used;if(take>n)take=n;memcpy(c->block+c->used,p,take);c->used+=take;p+=take;n-=take;if(c->used==64){sha_block(c,c->block);c->used=0;}}
+    while (n) {
+        size_t take = 64 - c->used;
+        if (take > n) take = n;
+        memcpy(c->block + c->used, p, take);
+        c->used += take;
+        p += take;
+        n -= take;
+        if (c->used == 64) {
+            sha_block(c, c->block);
+            c->used = 0;
+        }
+    }
 }
 static void sha_final(sha256_ctx *c, unsigned char out[32])
 {
     uint64_t bits=c->bits; unsigned i;c->block[c->used++]=0x80;
     if(c->used>56){memset(c->block+c->used,0,64-c->used);sha_block(c,c->block);c->used=0;}
-    memset(c->block+c->used,0,56-c->used);for(i=0;i<8;i++)c->block[63-i]=(unsigned char)(bits>>(i*8));sha_block(c,c->block);
+    memset(c->block + c->used, 0, 56 - c->used);
+    for (i = 0; i < 8; i++) c->block[63 - i] = (unsigned char)(bits >> (i * 8));
+    sha_block(c, c->block);
     for(i=0;i<8;i++){out[i*4]=(unsigned char)(c->h[i]>>24);out[i*4+1]=(unsigned char)(c->h[i]>>16);out[i*4+2]=(unsigned char)(c->h[i]>>8);out[i*4+3]=(unsigned char)c->h[i];}memset(c,0,sizeof *c);
 }
 static void hash(const char *script,size_t n,unsigned char out[32]){sha256_ctx c;sha_init(&c);sha_update(&c,script,n);sha_final(&c,out);}
@@ -49,9 +62,19 @@ int pacblob_unpack(const unsigned char *blob,size_t length,const char *script,si
 {
     unsigned char digest[32];size_t count;
     if(!blob||length<35||blob[0]!=PAC_BLOB_FORMAT||((length-33)&1)||!script||!n)return 0;
-    count=(length-33)/2;if(count<2||count>PAC_BLOB_SOURCE_MAX||count>cap||!source)return 0;hash(script,n,digest);
+    count = (length - 33) / 2;
+    if (count < 2 || count > PAC_BLOB_SOURCE_MAX || count > cap || !source) return 0;
+    hash(script, n, digest);
     if(memcmp(digest,blob+1,32)){memset(digest,0,sizeof digest);return 0;}memset(digest,0,sizeof digest);
-    memcpy(source,blob+33,count*2);if(source[count-1])return 0;{size_t i;for(i=0;i+1<count;i++)if(!source[i])return 0;}if(units)*units=count;return 1;
+    memcpy(source, blob + 33, count * 2);
+    if (source[count - 1]) return 0;
+    {
+        size_t i;
+        for (i = 0; i + 1 < count; i++)
+            if (!source[i]) return 0;
+    }
+    if (units) *units = count;
+    return 1;
 }
 
 size_t pacitem_pack(int enabled, const uint16_t *source, size_t units,

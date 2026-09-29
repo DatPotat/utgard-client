@@ -18,18 +18,31 @@ static HANDLE reload_pipe;
 static volatile LONG reload_drop;   /* VPN went off during a reload: close after it */
 
 static int say(wchar_t *err, size_t cap, const wchar_t *text)
-{ if (err && cap) StringCchCopyW(err, cap, text); return 0; }
+{
+    if (err && cap) StringCchCopyW(err, cap, text);
+    return 0;
+}
 
 static int read_all(HANDLE h, void *data, DWORD length)
 {
     BYTE *p = (BYTE *)data;
-    while (length) { DWORD got = 0; if (!ReadFile(h, p, length, &got, NULL) || !got) return 0; p += got; length -= got; }
+    while (length) {
+        DWORD got = 0;
+        if (!ReadFile(h, p, length, &got, NULL) || !got) return 0;
+        p += got;
+        length -= got;
+    }
     return 1;
 }
 static int write_all(HANDLE h, const void *data, DWORD length)
 {
     const BYTE *p = (const BYTE *)data;
-    while (length) { DWORD put = 0; if (!WriteFile(h, p, length, &put, NULL) || !put) return 0; p += put; length -= put; }
+    while (length) {
+        DWORD put = 0;
+        if (!WriteFile(h, p, length, &put, NULL) || !put) return 0;
+        p += put;
+        length -= put;
+    }
     return 1;
 }
 
@@ -187,7 +200,10 @@ static HANDLE restricted_token(void)
     ZeroMemory(&label, sizeof label); label.Label.Attributes = SE_GROUP_INTEGRITY; label.Label.Sid = low;
     if (!SetTokenInformation(token, TokenIntegrityLevel, &label, sizeof label + GetLengthSid(low))) goto fail;
 done:
-    LocalFree(low); if (admins) FreeSid(admins); if (source) CloseHandle(source); return token;
+    LocalFree(low);
+    if (admins) FreeSid(admins);
+    if (source) CloseHandle(source);
+    return token;
 fail:
     CloseHandle(token); token = NULL; goto done;
 }
@@ -236,7 +252,7 @@ int pacproc_prepare(pac_process *p, genconf_input *in, const pac_store *store, w
     HANDLE token = NULL; HANDLE inherit[2];
     SIZE_T bytes = 0; LPPROC_THREAD_ATTRIBUTE_LIST attrs = NULL; wchar_t path[2048], dir[2048], cmd[4096];
     pacproc_ready ready; pacproc_init init; BOOL started = FALSE; char actual_sha[65]; int i, count = 0;
-    send_context *sender = NULL; HANDLE send_thread = NULL, image = INVALID_HANDLE_VALUE; DWORD create_error;
+    send_context *sender = NULL; HANDLE send_thread = NULL, image = INVALID_HANDLE_VALUE; DWORD create_error, fail_error;
     if (!p || !in || !store) return say(err, cap, L"Внутренняя ошибка запуска PAC");
     ZeroMemory(p, sizeof *p); ZeroMemory(&ready, sizeof ready);
     if (!helper_paths(path, dir, p->helper_path)) return say(err, cap, L"Слишком длинный путь к папке Utgard");
@@ -261,7 +277,9 @@ int pacproc_prepare(pac_process *p, genconf_input *in, const pac_store *store, w
     limit.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     if (!p->job || !SetInformationJobObject(p->job, JobObjectExtendedLimitInformation, &limit, sizeof limit)) goto fail;
     InitializeProcThreadAttributeList(NULL, 1, 0, &bytes); attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(bytes);
-    if (!attrs || !InitializeProcThreadAttributeList(attrs, 1, 0, &bytes)) goto fail;
+    if (!attrs) goto fail;
+    /* A list that failed to initialise must not reach DeleteProcThreadAttributeList. */
+    if (!InitializeProcThreadAttributeList(attrs, 1, 0, &bytes)) { free(attrs); attrs = NULL; goto fail; }
     inherit[0] = ready_wr; inherit[1] = command_rd;
     if (!UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof inherit, NULL, NULL)) goto fail;
     token = restricted_token(); if (!token) goto fail;
@@ -273,7 +291,12 @@ int pacproc_prepare(pac_process *p, genconf_input *in, const pac_store *store, w
     create_error = started ? 0 : GetLastError();
     CloseHandle(image);
     image = INVALID_HANDLE_VALUE;
-    if (!started) { if (err && cap) StringCchPrintfW(err, cap, L"Не удалось запустить ограниченный PAC-процесс (ошибка Windows %lu)", (unsigned long)create_error); goto fail; }
+    if (!started) {
+        if (err && cap)
+            StringCchPrintfW(err, cap, L"Не удалось запустить ограниченный PAC-процесс (ошибка Windows %lu)",
+                             (unsigned long)create_error);
+        goto fail;
+    }
     p->process = pi.hProcess; CloseHandle(pi.hThread); CloseHandle(ready_wr); ready_wr = NULL; CloseHandle(command_rd); command_rd = NULL;
     init.magic = PACPROC_MAGIC; init.script_count = (DWORD)count;
     {
@@ -318,6 +341,7 @@ int pacproc_prepare(pac_process *p, genconf_input *in, const pac_store *store, w
     in->vpn_proxy_port = ready.proxy_port; in->proxy_password = p->password; in->client_exe = p->helper_path; p->prepared = 1;
     CloseHandle(ready_rd); CloseHandle(token); DeleteProcThreadAttributeList(attrs); free(attrs); return 1;
 fail:
+    fail_error = GetLastError();   /* before the cleanup below overwrites it */
     if (send_thread) {
         /* Not reached with a live sender today; kept safe regardless. */
         int given = 0;
@@ -332,7 +356,7 @@ fail:
     if (token) CloseHandle(token);
     if (attrs) { DeleteProcThreadAttributeList(attrs); free(attrs); }
     pacproc_cancel(p);
-    if (err && cap && !err[0]) StringCchPrintfW(err, cap, L"Не удалось запустить изолированный PAC-процесс (ошибка Windows %lu)", (unsigned long)GetLastError());
+    if (err && cap && !err[0]) StringCchPrintfW(err, cap, L"Не удалось запустить изолированный PAC-процесс (ошибка Windows %lu)", (unsigned long)fail_error);
     return 0;
 }
 
