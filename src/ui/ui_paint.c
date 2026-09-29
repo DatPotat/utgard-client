@@ -35,7 +35,7 @@ static void paint_connect(HDC dc, const RECT *c)
     if (k == STATE_ON) {
         rounded_r(dc, &b, CLR_ACCENT, CLR_ACCENT, S(16));
         title = L"Включено";
-        StringCchPrintfW(body, 400, L"Через VPN: %d %s, %d %s%s. Остальное — напрямую.",
+        StringCchPrintfW(body, 400, L"Через VPN: %d %s, %d %s%s.\nОстальное — напрямую.",
                          g_host_count, plural_ru(g_host_count, L"сайт", L"сайта", L"сайтов"),
                          g_app_count, plural_ru(g_app_count, L"приложение", L"приложения", L"приложений"),
                          g_pac_count ? L", правила PAC" : L"");
@@ -342,8 +342,9 @@ static void paint_zapret(HDC dc, const RECT *c)
                          g_status.mode == ZAPRET_SERVICE ? L"служба Windows" : L"отдельный bat");
     else
         StringCchCopyW(line, 400, L"стратегия неизвестна");
-    text_at(dc, r.left + S(68), r.top + S(44), g.lw - S(92), S(20), line,
-            running ? CLR_ON_ACCENT : CLR_MUTED, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
+    /* Two lines: "стратегия …, служба Windows" does not fit one at 10 pt. */
+    text_at(dc, r.left + S(68), r.top + S(44), g.lw - S(92), S(40), line,
+            running ? CLR_ON_ACCENT : CLR_MUTED, g_font_small, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
 
     if (GetWindowTextLengthW(g_zap_search) > 0)
         StringCchPrintfW(line, 400, L"Найдено %d из %d", strategies_shown(), g_count);
@@ -366,13 +367,17 @@ static void paint_zapret(HDC dc, const RECT *c)
         if (g_exc_known == 0)
             StringCchCopyW(line, 400, g_prof.count ? L"Проверяю адреса серверов…" : L"Нет серверов — исключать нечего");
         else
-            StringCchPrintfW(line, 400, ok ? L"Адреса серверов VPN в исключениях: %d из %d"
-                                           : L"В исключениях %d из %d адресов серверов VPN",
+            StringCchPrintfW(line, 400, L"Адреса VPN в исключениях: %d из %d",
                              g_exc_present, g_exc_known);
         state_icon(dc, ok ? STATE_ON : (g_exc_known ? STATE_ERROR : STATE_OFF),
                    g.rx + S(24), g.compat + S(50), S(8), 0);
-        text_at(dc, g.rx + S(42), g.compat + S(26), g.rw - S(42) - S(120), S(48), line,
-                CLR_TEXT, g_font, DT_LEFT | DT_END_ELLIPSIS);
+        {
+            /* Room up to the "Исправить" button when it shows, else the row. */
+            int room = g.rw - S(42) - S(16);
+            if (IsWindowVisible(g_zap_fix)) room -= caption_width(g_zap_fix) + S(24) + S(8);
+            text_at(dc, g.rx + S(42), g.compat + S(26), room, S(48), line,
+                    CLR_TEXT, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
+        }
     }
 
     group_label(dc, g.rx, g.filters, g.rw, L"Фильтры");
