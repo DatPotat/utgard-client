@@ -360,8 +360,8 @@ static int spawn(wchar_t *cmd, DWORD flags, HANDLE in, HANDLE out, HANDLE err,
    way in. The pipe is sized for the whole text, and sing-box reads stdin to
    EOF before anything else, so the write does not wait on the child. Our
    write end is closed here: EOF is what ends sing-box's read.
-   ponytail: a child that never reads would block this write; sing-box reads
-   first thing, a writer thread is the fix if another consumer ever appears. */
+   A child that never read would block this write; sing-box reads it first
+   thing. Should another consumer ever appear, a writer thread is the fix. */
 static HANDLE stdin_with(const char *text, HANDLE *writer)
 {
     SECURITY_ATTRIBUTES sa;

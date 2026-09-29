@@ -17,6 +17,7 @@
 #include "zapret.h"
 
 #include <strsafe.h>
+#include <stdlib.h>
 
 #include "fileio.h"
 #include <shellapi.h>
@@ -26,6 +27,7 @@
 
 #define EXC_MAX      64
 #define EXC_TEXT_MAX 65536
+#define HOSTS_READ_MAX (1024 * 1024)
 #define PLACEHOLDER  "203.0.113.113/32"
 
 static int exc_path(const wchar_t *dir, const wchar_t *name,
@@ -437,7 +439,8 @@ int zapret_hosts_check(wchar_t *temp_path, size_t temp_cap, int *needs_update,
                        wchar_t *err, size_t errcap)
 {
     static char downloaded[EXC_TEXT_MAX];
-    static char system_hosts[EXC_TEXT_MAX];
+    char       *system_hosts;
+    int         rd;
     wchar_t     root[ZAPRET_PATH_MAX], sysdir[MAX_PATH], hosts[ZAPRET_PATH_MAX];
 
     if (needs_update) *needs_update = 0;
@@ -451,8 +454,8 @@ int zapret_hosts_check(wchar_t *temp_path, size_t temp_cap, int *needs_update,
     }
 
     if (!net_download(HOSTS_URL, temp_path, err, errcap)) return 0;
-    if (!file_read(temp_path, downloaded, EXC_TEXT_MAX, NULL)) {
-        if (err && errcap) StringCchCopyW(err, errcap, L"Скачанный файл не читается");
+    if (file_read(temp_path, downloaded, EXC_TEXT_MAX, NULL) != 1) {
+        if (err && errcap) StringCchCopyW(err, errcap, L"Скачанный файл не читается или больше 64 КБ");
         return 0;
     }
 
@@ -463,12 +466,28 @@ int zapret_hosts_check(wchar_t *temp_path, size_t temp_cap, int *needs_update,
         return 0;
     }
 
+    system_hosts = (char *)malloc(HOSTS_READ_MAX);
+    if (!system_hosts) {
+        if (err && errcap) StringCchCopyW(err, errcap, L"Не хватило памяти");
+        return 0;
+    }
     system_hosts[0] = '\0';
-    file_read(hosts, system_hosts, EXC_TEXT_MAX, NULL);
+    /* A missing hosts file is an empty one; one that exists but cannot be
+       read whole must not be reported as needing the update. */
+    rd = file_read(hosts, system_hosts, HOSTS_READ_MAX, NULL);
+    if (rd != 1 && GetFileAttributesW(hosts) != INVALID_FILE_ATTRIBUTES) {
+        free(system_hosts);
+        if (err && errcap)
+            StringCchCopyW(err, errcap, rd == FILE_READ_PARTIAL
+                ? L"Системный hosts больше 1 МБ — сравнить не удалось"
+                : L"Не удалось прочитать системный hosts");
+        return 0;
+    }
 
     if (!line_present(system_hosts, downloaded, 0) ||
         !line_present(system_hosts, downloaded, 1))
         if (needs_update) *needs_update = 1;
 
+    free(system_hosts);
     return 1;
 }

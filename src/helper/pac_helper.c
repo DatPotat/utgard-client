@@ -9,13 +9,23 @@
 static int write_all(HANDLE h, const void *data, DWORD length)
 {
     const BYTE *p = (const BYTE *)data;
-    while (length) { DWORD put = 0; if (!WriteFile(h, p, length, &put, NULL) || !put) return 0; p += put; length -= put; }
+    while (length) {
+        DWORD put = 0;
+        if (!WriteFile(h, p, length, &put, NULL) || !put) return 0;
+        p += put;
+        length -= put;
+    }
     return 1;
 }
 static int read_all(HANDLE h, void *data, DWORD length)
 {
     BYTE *p = (BYTE *)data;
-    while (length) { DWORD got = 0; if (!ReadFile(h, p, length, &got, NULL) || !got) return 0; p += got; length -= got; }
+    while (length) {
+        DWORD got = 0;
+        if (!ReadFile(h, p, length, &got, NULL) || !got) return 0;
+        p += got;
+        length -= got;
+    }
     return 1;
 }
 

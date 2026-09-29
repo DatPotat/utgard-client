@@ -1,6 +1,7 @@
 #define FD_SETSIZE 1024
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <iphlpapi.h>
 #include "pacloop.h"
 #include "pacbridge.h"
 #include "pacdns.h"
@@ -348,7 +349,9 @@ static void relay_tcp(SOCKET a, SOCKET b, LONG gen)
         struct timeval tv = { 1, 0 };
         int i;
         pacloop_state ready;
-        FD_ZERO(&f); if (a_open) FD_SET(a, &f); if (b_open) FD_SET(b, &f);
+        FD_ZERO(&f);
+        if (a_open) FD_SET(a, &f);
+        if (b_open) FD_SET(b, &f);
         ready = pacloop_select(select(0, &f, NULL, NULL, &tv));
         if (ready == PACLOOP_ERROR) return;
         if (ready == PACLOOP_IDLE) {
@@ -392,6 +395,82 @@ static void udp_close(udp_peer *p)
     p->data = p->control = INVALID_SOCKET;
 }
 
+/* An IPv4 owner table: TCP connections or UDP endpoints, with PIDs.
+   NULL when Windows refuses it - the relay then works as before. */
+static void *owner_table(int tcp)
+{
+    void *t = NULL;
+    DWORD size = 0, r;
+    int   tries;
+    for (tries = 0; tries < 4; tries++) {
+        r = tcp ? GetExtendedTcpTable(t, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_CONNECTIONS, 0)
+                : GetExtendedUdpTable(t, &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0);
+        if (r == NO_ERROR) return t;
+        free(t);
+        t = NULL;
+        if (r != ERROR_INSUFFICIENT_BUFFER) return NULL;
+        size += 4096;                    /* the table may grow before the next call */
+        if (!(t = malloc(size))) return NULL;
+    }
+    free(t);
+    return NULL;
+}
+
+/* Ports come in network byte order in the low 16 bits; the rest is not
+   guaranteed to be zero. 0 = not listed, NO_TABLE = table refused. */
+#define NO_TABLE ((DWORD)-1)
+static DWORD tcp_owner(u_short local_port, u_short remote_port)
+{
+    MIB_TCPTABLE_OWNER_PID *t = (MIB_TCPTABLE_OWNER_PID *)owner_table(1);
+    DWORD i, pid = 0;
+    if (!t) return NO_TABLE;
+    for (i = 0; i < t->dwNumEntries && !pid; i++)
+        if (t->table[i].dwLocalAddr == htonl(INADDR_LOOPBACK) &&
+            (u_short)t->table[i].dwLocalPort == local_port &&
+            (u_short)t->table[i].dwRemotePort == remote_port)
+            pid = t->table[i].dwOwningPid;
+    free(t);
+    return pid;
+}
+
+static DWORD udp_owner(u_short port)
+{
+    MIB_UDPTABLE_OWNER_PID *t = (MIB_UDPTABLE_OWNER_PID *)owner_table(0);
+    DWORD i, loopback_pid = 0, any_pid = 0;
+    if (!t) return NO_TABLE;
+    for (i = 0; i < t->dwNumEntries; i++) {
+        if ((u_short)t->table[i].dwLocalPort != port) continue;
+        if (t->table[i].dwLocalAddr == htonl(INADDR_LOOPBACK) && !loopback_pid)
+            loopback_pid = t->table[i].dwOwningPid;
+        else if (!t->table[i].dwLocalAddr && !any_pid)
+            any_pid = t->table[i].dwOwningPid;
+    }
+    free(t);
+    return loopback_pid ? loopback_pid : any_pid;
+}
+
+/* SOCKS5 UDP carries no credentials: the association is taken by the first
+   datagram. Only sing-box - the process on the other end of this
+   authenticated control connection - may take it. When that cannot be
+   told, the datagram is accepted as before and the reason is counted, so a
+   live check shows which one it was. */
+enum { OWNER_SINGBOX, OWNER_FOREIGN, OWNER_NO_TABLE, OWNER_NOT_LISTED };
+static int sender_check(SOCKET control, u_short from_port)
+{
+    struct sockaddr_in mine, peer;
+    int   a = sizeof mine, b = sizeof peer;
+    DWORD expected, actual;
+    if (getsockname(control, (struct sockaddr *)&mine, &a) ||
+        getpeername(control, (struct sockaddr *)&peer, &b)) return OWNER_NOT_LISTED;
+    expected = tcp_owner(peer.sin_port, mine.sin_port);
+    if (expected == NO_TABLE) return OWNER_NO_TABLE;
+    if (!expected) return OWNER_NOT_LISTED;
+    actual = udp_owner(from_port);
+    if (actual == NO_TABLE) return OWNER_NO_TABLE;
+    if (!actual) return OWNER_NOT_LISTED;
+    return expected == actual ? OWNER_SINGBOX : OWNER_FOREIGN;
+}
+
 static void relay_udp(SOCKET control, LONG gen)
 {
     udp_peer peers[512];
@@ -427,7 +506,15 @@ static void relay_udp(SOCKET control, LONG gen)
             if (have_client && (from.sin_port != client.sin_port || from.sin_addr.s_addr != client.sin_addr.s_addr)) continue;
             asize = pacudp_address_size(packet + 3, (size_t)(n - 3));
             if (!asize) continue;
-            if (!have_client) { client = from; have_client = 1; }
+            if (!have_client) {
+                int owner = sender_check(control, from.sin_port);
+                if (owner == OWNER_FOREIGN) { pacstatus_udp_foreign(); continue; }
+                if (owner == OWNER_SINGBOX) pacstatus_udp_verified();
+                else if (owner == OWNER_NO_TABLE) pacstatus_udp_no_table();
+                else pacstatus_udp_not_listed();
+                client = from;
+                have_client = 1;
+            }
             for (i = 0; i < 512; i++) if (peers[i].data != INVALID_SOCKET && peers[i].size == asize && !memcmp(peers[i].addr, packet + 3, asize)) { slot = i; break; }
             if (slot < 0) {
                 unsigned char bound[259], any[7] = { 1, 0, 0, 0, 0, 0, 0 };

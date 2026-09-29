@@ -503,8 +503,15 @@ static int wg_addresses(const char *in, char *out, size_t cap)
 
         for (i = 0; tok[i]; i++) {
             char c = tok[i];
-            if (c == '/') { if (slash++) return 0; bits = strtol(tok + i + 1, NULL, 10); continue; }
-            if (slash) { if (c < '0' || c > '9') return 0; continue; }
+            if (c == '/') {
+                if (slash++) return 0;
+                bits = strtol(tok + i + 1, NULL, 10);
+                continue;
+            }
+            if (slash) {
+                if (c < '0' || c > '9') return 0;
+                continue;
+            }
             if (!(hexval(c) >= 0 || c == '.' || c == ':')) return 0;
         }
         v6 = strchr(tok, ':') != NULL;
@@ -539,7 +546,10 @@ static int wg_reserved(const char *in, char *out, size_t cap)
         if (end == p || v[k] < 0 || v[k] > 255) return 0;
         p = end;
         while (*p == ' ') p++;
-        if (k < 2) { if (*p != ',') return 0; p++; }
+        if (k < 2) {
+            if (*p != ',') return 0;
+            p++;
+        }
     }
     if (*p) return 0;
     return snprintf(out, cap, "%ld,%ld,%ld", v[0], v[1], v[2]) < (int)cap;
@@ -763,7 +773,11 @@ static int awg_hdr_range(const char *awg, const char *key, unsigned long def,
 
     if (!v) { *lo = *hi = def; return 1; }
     d = memchr(v, '-', n);
-    if (!d) { if (!awg_uint(v, n, 4294967295UL, lo)) return 0; *hi = *lo; return 1; }
+    if (!d) {
+        if (!awg_uint(v, n, 4294967295UL, lo)) return 0;
+        *hi = *lo;
+        return 1;
+    }
     return awg_uint(v, (size_t)(d - v), 4294967295UL, lo) &&
            awg_uint(d + 1, n - (size_t)(d - v) - 1, 4294967295UL, hi);
 }

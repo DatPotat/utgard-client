@@ -200,7 +200,10 @@ int lists_build_text(const char *in, char *out, size_t outcap, lists_stats *st)
         int  j, seen = 0, r;
 
         r = lists_normalize(raw[i], entry, sizeof entry);
-        if (r < 0) { if (st) st->invalid++; continue; }
+        if (r < 0) {
+            if (st) st->invalid++;
+            continue;
+        }
         if (r == 0) continue;
 
         if (strchr(entry, '/')) {
