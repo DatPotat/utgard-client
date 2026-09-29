@@ -305,7 +305,7 @@ void zapret_geometry(const RECT *c, zap_geo *g)
     g->rx  = PAD + g->lw + S(24);
     g->rw  = c->right - PAD - g->rx;
     g->status.left = PAD; g->status.top = g->y0;
-    g->status.right = PAD + g->lw; g->status.bottom = g->y0 + S(128);
+    g->status.right = PAD + g->lw; g->status.bottom = g->y0 + S(144);
     g->strat  = g->status.bottom + S(16);
     g->search = g->strat + S(26);
     g->list_top = g->search + S(48);
@@ -397,8 +397,9 @@ static void layout_zapret(HWND hwnd, const RECT *rc)
 
     {
         int done = g_exc_known > 0 && g_exc_present >= g_exc_known;
-        w = caption_width(g_zap_fix) + S(32);
-        MoveWindow(g_zap_fix, g.rx + g.rw - S(8) - w, g.compat + S(26) + S(4), w, S(40), TRUE);
+        /* A button in a 48-high card row: 32 high, 8 clear on every side. */
+        w = caption_width(g_zap_fix) + S(24);
+        MoveWindow(g_zap_fix, g.rx + g.rw - S(8) - w, g.compat + S(26) + S(8), w, S(32), TRUE);
         ShowWindow(g_zap_fix, on && !done && g_prof.count > 0 ? SW_SHOW : SW_HIDE);
     }
     {
@@ -413,10 +414,12 @@ static void layout_zapret(HWND hwnd, const RECT *rc)
     MoveWindow(g_zap_list, g.rx + S(1), g.lists + S(26) + S(1), g.rw - S(2), S(47), TRUE);
     SetPropW(g_zap_list, L"utgard.round", (HANDLE)1);
     ShowWindow(g_zap_list, on);
-    w = caption_width(g_zap_ipupd) + S(24);
-    MoveWindow(g_zap_ipupd, g.rx + g.rw - S(12) - w, g.lists + S(26) + S(48) + S(8), w, S(32), TRUE);
-    w = caption_width(g_zap_hosts) + S(24);
-    MoveWindow(g_zap_hosts, g.rx + g.rw - S(12) - w, g.lists + S(26) + S(96) + S(8), w, S(32), TRUE);
+    /* One under the other: one width, the wider caption's; 8 clear all round. */
+    w = caption_width(g_zap_ipupd);
+    if (caption_width(g_zap_hosts) > w) w = caption_width(g_zap_hosts);
+    w += S(24);
+    MoveWindow(g_zap_ipupd, g.rx + g.rw - S(8) - w, g.lists + S(26) + S(48) + S(8), w, S(32), TRUE);
+    MoveWindow(g_zap_hosts, g.rx + g.rw - S(8) - w, g.lists + S(26) + S(96) + S(8), w, S(32), TRUE);
     ShowWindow(g_zap_ipupd, on);
     ShowWindow(g_zap_hosts, on);
 
@@ -601,6 +604,9 @@ static void layout_busy(HWND hwnd, const RECT *rc)
         EnableWindow(g_zap_hosts, TRUE);
         EnableWindow(g_pick_path, TRUE);
         EnableWindow(g_zap_list, TRUE);
+        /* Shown only when addresses are missing (layout_zapret); a job that
+           ran meanwhile greyed it, and nothing else would bring it back. */
+        EnableWindow(g_zap_fix, TRUE);
     }
 }
 
