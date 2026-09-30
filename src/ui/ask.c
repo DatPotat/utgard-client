@@ -69,7 +69,7 @@ void ask_configure(ask_draw_button_fn draw, ask_metric_fn scale,
     g_ask_surface_color = surface_color;
 }
 
-static int S(int v) { return g_scale ? g_scale(v) : v; }
+static int scaled(int v) { return g_scale ? g_scale(v) : v; }
 
 static const wchar_t HOT_PROP[] = L"utgard.hot";
 
@@ -116,7 +116,7 @@ static LRESULT CALLBACK hover_proc(HWND h, UINT m, WPARAM w, LPARAM l,
 
 static void field_box(HDC dc, const RECT *r)
 {
-    if (g_round) g_round(dc, r, g_ask_surface_color, g_ask_border, S(10));
+    if (g_round) g_round(dc, r, g_ask_surface_color, g_ask_border, scaled(10));
     else FrameRect(dc, r, g_ask_line);
 }
 
@@ -148,7 +148,7 @@ static LRESULT CALLBACK center_proc(HWND h, UINT m, WPARAM w, LPARAM l,
             int   line = edit_line_height(h);
             int   high = r->bottom - r->top;
             int   top  = (high - line) / 2;
-            int   side = S(8);
+            int   side = scaled(8);
 
             if (top < 0) top = 0;
             r->top    += top;
@@ -242,7 +242,7 @@ static LRESULT CALLBACK ask_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         /* The edit sits inside a rounded 40-pixel field, clear of its corners. */
         st->edit = CreateWindowExW(0, L"EDIT", L"",
                                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-                                   S(26), S(24) + st->hint_h + S(10) + S(4), S(388), S(32), hwnd,
+                                   scaled(26), scaled(24) + st->hint_h + scaled(10) + scaled(4), scaled(388), scaled(32), hwnd,
                                    (HMENU)(INT_PTR)ID_EDIT, cs->hInstance, NULL);
         SendMessageW(st->edit, EM_SETLIMITTEXT, (WPARAM)(st->cap - 1), 0);
         SendMessageW(st->edit, WM_SETFONT, (WPARAM)g_ask_font, TRUE);
@@ -250,17 +250,17 @@ static LRESULT CALLBACK ask_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
         {
             HWND b;
-            int  by = S(24) + st->hint_h + S(10) + S(40) + S(16);
+            int  by = scaled(24) + st->hint_h + scaled(10) + scaled(40) + scaled(16);
             b = CreateWindowExW(0, L"BUTTON", L"Отмена",
                                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                S(238), by, S(90), S(40), hwnd,
+                                scaled(238), by, scaled(90), scaled(40), hwnd,
                                 (HMENU)(INT_PTR)ID_CANCEL, cs->hInstance, NULL);
             SetWindowLongPtrW(b, GWLP_USERDATA, ASK_BTN_SECONDARY);            ask_hover_attach(b);
             SendMessageW(b, WM_SETFONT, (WPARAM)g_ask_font, TRUE);
 
             b = CreateWindowExW(0, L"BUTTON", L"Добавить",
                                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                S(336), by, S(90), S(40), hwnd,
+                                scaled(336), by, scaled(90), scaled(40), hwnd,
                                 (HMENU)(INT_PTR)ID_OK, cs->hInstance, NULL);
             SetWindowLongPtrW(b, GWLP_USERDATA, ASK_BTN_PRIMARY);            ask_hover_attach(b);
             SendMessageW(b, WM_SETFONT, (WPARAM)g_ask_font, TRUE);
@@ -289,14 +289,14 @@ static LRESULT CALLBACK ask_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         SetTextColor(dc, g_ask_muted);
         SetBkMode(dc, TRANSPARENT);
         {
-            RECT t = { S(16), S(16), c.right - S(16),
-                       S(16) + (st ? st->hint_h : S(20)) };
+            RECT t = { scaled(16), scaled(16), c.right - scaled(16),
+                       scaled(16) + (st ? st->hint_h : scaled(20)) };
             DrawTextW(dc, st ? st->hint : L"", -1, &t, DT_LEFT | DT_WORDBREAK);
         }
         SelectObject(dc, old);
 
-        box.left = S(16); box.top = S(24) + (st ? st->hint_h : 0) + S(10);
-        box.right = c.right - S(16); box.bottom = box.top + S(40);
+        box.left = scaled(16); box.top = scaled(24) + (st ? st->hint_h : 0) + scaled(10);
+        box.right = c.right - scaled(16); box.bottom = box.top + scaled(40);
         field_box(dc, &box);
 
         EndPaint(hwnd, &ps);
@@ -365,24 +365,24 @@ int ask_string(HWND owner, const wchar_t *title, const wchar_t *hint,
     {
         HDC     dc  = GetDC(owner);
         HGDIOBJ old = SelectObject(dc, g_ask_small);
-        RECT    t   = { 0, 0, S(408), 0 };
+        RECT    t   = { 0, 0, scaled(408), 0 };
         DrawTextW(dc, hint ? hint : L"", -1, &t, DT_CALCRECT | DT_WORDBREAK | DT_LEFT);
         st.hint_h = t.bottom - t.top;
-        if (st.hint_h < S(16)) st.hint_h = S(16);
+        if (st.hint_h < scaled(16)) st.hint_h = scaled(16);
         SelectObject(dc, old);
         ReleaseDC(owner, dc);
     }
 
     register_class(inst);
 
-    want.left = 0; want.top = 0; want.right = S(440);
-    want.bottom = S(24) + st.hint_h + S(10) + S(40) + S(16) + S(40) + S(16);
-    AdjustWindowRectExForDpi(&want, style, FALSE, 0, (UINT)S(96));
+    want.left = 0; want.top = 0; want.right = scaled(440);
+    want.bottom = scaled(24) + st.hint_h + scaled(10) + scaled(40) + scaled(16) + scaled(40) + scaled(16);
+    AdjustWindowRectExForDpi(&want, style, FALSE, 0, (UINT)scaled(96));
     GetWindowRect(owner, &o);
 
     hwnd = CreateWindowExW(WS_EX_DLGMODALFRAME, L"UtgardAsk", title, style,
                            o.left + ((o.right - o.left) - (want.right - want.left)) / 2,
-                           o.top + S(120),
+                           o.top + scaled(120),
                            want.right - want.left, want.bottom - want.top,
                            owner, NULL, inst, &st);
     if (!hwnd) return 0;
@@ -430,7 +430,7 @@ typedef struct {
     HWND      yes, no;
 } steps_state;
 
-static int steps_text_top(const steps_state *st) { return st->count > 1 ? S(56) : S(18); }
+static int steps_text_top(const steps_state *st) { return st->count > 1 ? scaled(56) : scaled(18); }
 
 static int caption_width(HWND b)
 {
@@ -439,26 +439,26 @@ static int caption_width(HWND b)
     int     n = GetWindowTextW(b, text, 64);
     HDC     dc = GetDC(b);
     HGDIOBJ old;
-    if (!dc) return S(120);
+    if (!dc) return scaled(120);
     old = SelectObject(dc, g_ask_font);
     GetTextExtentPoint32W(dc, text, n, &size);
     SelectObject(dc, old);
     ReleaseDC(b, dc);
-    return size.cx + S(32);
+    return size.cx + scaled(32);
 }
 
 /* Captions of the current step, right-aligned: [no] [yes]. */
 static void steps_place(HWND hwnd, steps_state *st)
 {
     RECT c;
-    int  y = steps_text_top(st) + st->text_h + S(18), yw, nw;
+    int  y = steps_text_top(st) + st->text_h + scaled(18), yw, nw;
     GetClientRect(hwnd, &c);
     SetWindowTextW(st->yes, st->steps[st->current].yes);
     SetWindowTextW(st->no,  st->steps[st->current].no);
     yw = caption_width(st->yes);
     nw = caption_width(st->no);
-    MoveWindow(st->yes, c.right - S(16) - yw, y, yw, S(30), TRUE);
-    MoveWindow(st->no,  c.right - S(16) - yw - S(8) - nw, y, nw, S(30), TRUE);
+    MoveWindow(st->yes, c.right - scaled(16) - yw, y, yw, scaled(30), TRUE);
+    MoveWindow(st->no,  c.right - scaled(16) - yw - scaled(8) - nw, y, nw, scaled(30), TRUE);
     InvalidateRect(hwnd, NULL, TRUE);
 }
 
@@ -476,7 +476,7 @@ static void steps_paint(HWND hwnd, steps_state *st)
     HDC         dc = BeginPaint(hwnd, &ps);
     RECT        c, t;
     HGDIOBJ     old;
-    int         i, x = S(16);
+    int         i, x = scaled(16);
     GetClientRect(hwnd, &c);
     FillRect(dc, &c, g_ask_bg);
     SetBkMode(dc, TRANSPARENT);
@@ -489,19 +489,19 @@ static void steps_paint(HWND hwnd, steps_state *st)
                            : (i < st->current && st->steps[i].answer) ? ask_color(ASK_OK) : g_ask_muted;
             GetTextExtentPoint32W(dc, label, (int)wcslen(label), &size);
             SetTextColor(dc, color);
-            TextOutW(dc, x, S(16), label, (int)wcslen(label));
+            TextOutW(dc, x, scaled(16), label, (int)wcslen(label));
             if (i == st->current) {
                 HBRUSH accent = CreateSolidBrush(ask_color(ASK_ACCENT));
-                RECT   under = { x, S(16) + size.cy + S(6), x + size.cx, S(16) + size.cy + S(8) };
+                RECT   under = { x, scaled(16) + size.cy + scaled(6), x + size.cx, scaled(16) + size.cy + scaled(8) };
                 if (accent) { FillRect(dc, &under, accent); DeleteObject(accent); }
             }
-            x += size.cx + S(24);
+            x += size.cx + scaled(24);
         }
-        t.left = 0; t.right = c.right; t.top = S(44); t.bottom = S(45);
+        t.left = 0; t.right = c.right; t.top = scaled(44); t.bottom = scaled(45);
         FillRect(dc, &t, g_ask_line);
     }
     SetTextColor(dc, g_ask_text);
-    t.left = S(16); t.right = c.right - S(16);
+    t.left = scaled(16); t.right = c.right - scaled(16);
     t.top = steps_text_top(st); t.bottom = t.top + st->text_h;
     DrawTextW(dc, st->steps[st->current].text, -1, &t, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
     SelectObject(dc, old);
@@ -577,7 +577,7 @@ void ask_steps(HWND owner, const wchar_t *title, ask_step *steps, int count)
         HDC     dc  = GetDC(owner);
         HGDIOBJ old = SelectObject(dc, g_ask_font);
         for (i = 0; i < count; i++) {
-            RECT t = { 0, 0, S(428), 0 };
+            RECT t = { 0, 0, scaled(428), 0 };
             DrawTextW(dc, steps[i].text, -1, &t, DT_CALCRECT | DT_WORDBREAK | DT_LEFT | DT_NOPREFIX);
             if (t.bottom - t.top > st.text_h) st.text_h = t.bottom - t.top;
         }
@@ -597,13 +597,13 @@ void ask_steps(HWND owner, const wchar_t *title, ask_step *steps, int count)
         registered = 1;
     }
 
-    want.left = 0; want.top = 0; want.right = S(460);
-    want.bottom = steps_text_top(&st) + st.text_h + S(18) + S(30) + S(16);
-    AdjustWindowRectExForDpi(&want, style, FALSE, 0, (UINT)S(96));
+    want.left = 0; want.top = 0; want.right = scaled(460);
+    want.bottom = steps_text_top(&st) + st.text_h + scaled(18) + scaled(30) + scaled(16);
+    AdjustWindowRectExForDpi(&want, style, FALSE, 0, (UINT)scaled(96));
     GetWindowRect(owner, &o);
     hwnd = CreateWindowExW(WS_EX_DLGMODALFRAME, L"UtgardSteps", title, style,
                            o.left + ((o.right - o.left) - (want.right - want.left)) / 2,
-                           o.top + S(100), want.right - want.left, want.bottom - want.top,
+                           o.top + scaled(100), want.right - want.left, want.bottom - want.top,
                            owner, NULL, inst, &st);
     if (!hwnd) return;
 
@@ -656,7 +656,7 @@ static LRESULT CALLBACK msg_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         old = SelectObject(dc, g_ask_font);
         SetTextColor(dc, g_ask_text);
         SetBkMode(dc, TRANSPARENT);
-        t.left = S(24); t.top = S(24); t.right = c.right - S(24); t.bottom = t.top + (st ? st->text_h : 0);
+        t.left = scaled(24); t.top = scaled(24); t.right = c.right - scaled(24); t.bottom = t.top + (st ? st->text_h : 0);
         DrawTextW(dc, st ? st->text : L"", -1, &t, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
         SelectObject(dc, old);
         EndPaint(hwnd, &ps);
@@ -686,7 +686,7 @@ int ask_message(HWND owner, const wchar_t *title, const wchar_t *text,
     RECT       o, want;
     MSG        m;
     DWORD      style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
-    int        width = S(460), k, n = 0, x, by, bw[3];
+    int        width = scaled(460), k, n = 0, x, by, bw[3];
 
     labels[0] = b1; labels[1] = b2; labels[2] = b3;
     for (k = 0; k < 3 && labels[k]; k++) n++;
@@ -696,15 +696,15 @@ int ask_message(HWND owner, const wchar_t *title, const wchar_t *text,
     {
         HDC     dc  = GetDC(owner);
         HGDIOBJ old = SelectObject(dc, g_ask_font);
-        RECT    t   = { 0, 0, width - S(48), 0 };
+        RECT    t   = { 0, 0, width - scaled(48), 0 };
         DrawTextW(dc, st.text, -1, &t, DT_CALCRECT | DT_WORDBREAK | DT_LEFT | DT_NOPREFIX);
         st.text_h = t.bottom - t.top;
         SelectObject(dc, g_ask_font);
         for (k = 0; k < n; k++) {
             SIZE sz = { 0, 0 };
             GetTextExtentPoint32W(dc, labels[k], (int)wcslen(labels[k]), &sz);
-            bw[k] = sz.cx + S(40);
-            if (bw[k] < S(90)) bw[k] = S(90);
+            bw[k] = sz.cx + scaled(40);
+            if (bw[k] < scaled(90)) bw[k] = scaled(90);
         }
         SelectObject(dc, old);
         ReleaseDC(owner, dc);
@@ -718,24 +718,24 @@ int ask_message(HWND owner, const wchar_t *title, const wchar_t *text,
         RegisterClassExW(&wc);
         registered = 1;
     }
-    by = S(24) + st.text_h + S(24);
-    want.left = 0; want.top = 0; want.right = width; want.bottom = by + S(40) + S(20);
-    AdjustWindowRectExForDpi(&want, style, FALSE, 0, (UINT)S(96));
+    by = scaled(24) + st.text_h + scaled(24);
+    want.left = 0; want.top = 0; want.right = width; want.bottom = by + scaled(40) + scaled(20);
+    AdjustWindowRectExForDpi(&want, style, FALSE, 0, (UINT)scaled(96));
     GetWindowRect(owner, &o);
     hwnd = CreateWindowExW(WS_EX_DLGMODALFRAME, L"UtgardMsg", title ? title : L"Utgard", style,
                            o.left + ((o.right - o.left) - (want.right - want.left)) / 2,
                            o.top + ((o.bottom - o.top) - (want.bottom - want.top)) / 3,
                            want.right - want.left, want.bottom - want.top, owner, NULL, inst, &st);
     if (!hwnd) return 0;
-    x = width - S(20);
+    x = width - scaled(20);
     for (k = 0; k < n; k++) {
         x -= bw[k];
         buttons[k] = CreateWindowExW(0, L"BUTTON", labels[k], WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                     x, by, bw[k], S(40), hwnd, (HMENU)(INT_PTR)(ID_MSG_B1 + k), inst, NULL);
+                                     x, by, bw[k], scaled(40), hwnd, (HMENU)(INT_PTR)(ID_MSG_B1 + k), inst, NULL);
         SetWindowLongPtrW(buttons[k], GWLP_USERDATA, k == 0 ? ASK_BTN_PRIMARY : ASK_BTN_SECONDARY);
         ask_hover_attach(buttons[k]);
         SendMessageW(buttons[k], WM_SETFONT, (WPARAM)g_ask_font, TRUE);
-        x -= S(10);
+        x -= scaled(10);
     }
     EnableWindow(owner, FALSE);
     ShowWindow(hwnd, SW_SHOW);

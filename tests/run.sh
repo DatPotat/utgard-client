@@ -7,6 +7,9 @@
 # Usage: sh tests/run.sh            (from the repository root or from tests/)
 #        CC=clang sh tests/run.sh   (any host C compiler; default clang, then gcc)
 #        SINGBOX=/path/to/sing-box sh tests/run.sh
+#        UPDATE_GOLDEN=1 sh tests/run.sh
+#            rewrites tests/fixtures/genconf/ after an intended change of
+#            the generated config; review the diff before committing.
 #            also runs "sing-box check" on the generated config; needs a
 #            sing-box 1.14.1 binary for the host.
 set -eu
@@ -40,6 +43,7 @@ run test_awgconf   test_awgconf.c ../src/core/awgconf.c $LINK
 run test_vpnswitch test_vpnswitch.c ../src/core/vpnswitch.c
 run test_profiles  test_profiles.c ../src/core/profiles.c $LINK
 run test_genconf   test_genconf.c ../src/core/genconf.c ../src/core/defconfig.c $LINK
+run test_genconf_inputs test_genconf_inputs.c ../src/core/genconf.c ../src/core/defconfig.c $LINK
 run test_pac       test_pac.c $PAC
 run test_lists     test_lists.c ../src/core/lists.c ../vendor/parson/parson.c
 run test_update    test_update.c ../src/core/update.c
@@ -51,7 +55,12 @@ if [ -n "${SINGBOX:-}" ] && [ -f out/genconf_awg.json ]; then
     printf '{"version":3,"rules":[{"domain_suffix":["invalid.placeholder.local"]}]}' > out/list/general.json
     (cd out && "$SINGBOX" rule-set compile --output list/general.srs list/general.json >/dev/null &&
         "$SINGBOX" check --disable-color -c genconf_awg.json &&
-        "$SINGBOX" check --disable-color -c genconf_pac.json) && echo "sing-box check: ok" || { echo "sing-box check: FAILED"; fail=1; }
+        "$SINGBOX" check --disable-color -c genconf_pac.json &&
+        for g in golden_plain golden_overlays golden_pac golden_awg; do
+            "$SINGBOX" check --disable-color -c "$g.json" || exit 1
+        done) && echo "sing-box check: ok" || { echo "sing-box check: FAILED"; fail=1; }
 fi
+
+sh ./core_portable.sh || fail=1
 
 [ $fail -eq 0 ] && echo "ALL TESTS PASSED" || { echo "SOME TESTS FAILED"; exit 1; }

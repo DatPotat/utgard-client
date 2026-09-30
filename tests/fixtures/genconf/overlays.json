@@ -1,0 +1,274 @@
+{
+    "dns": {
+        "servers": [
+            {
+                "tag": "local",
+                "type": "local"
+            },
+            {
+                "tag": "doh",
+                "type": "https",
+                "server": "cloudflare-dns.com",
+                "server_port": 443,
+                "path": "\/dns-query",
+                "domain_resolver": "local"
+            },
+            {
+                "tag": "corp",
+                "type": "udp",
+                "server": "10.0.0.53"
+            }
+        ],
+        "rules": [
+            {
+                "domain": [
+                    "vless.example.com",
+                    "vmess.example.com",
+                    "trojan.example.com"
+                ],
+                "server": "local"
+            },
+            {
+                "domain": [
+                    "sstp.corp.example"
+                ],
+                "server": "local"
+            },
+            {
+                "domain_suffix": [
+                    "corp.example"
+                ],
+                "server": "corp"
+            },
+            {
+                "rule_set": [
+                    "general"
+                ],
+                "server": "doh"
+            }
+        ],
+        "final": "local",
+        "strategy": "ipv4_only"
+    },
+    "outbounds": [
+        {
+            "type": "direct",
+            "tag": "direct"
+        },
+        {
+            "tag": "vless",
+            "server": "vless.example.com",
+            "server_port": 443,
+            "type": "vless",
+            "uuid": "00000000-0000-0000-0000-000000000001",
+            "flow": "xtls-rprx-vision",
+            "tls": {
+                "enabled": true,
+                "server_name": "www.example.com",
+                "utls": {
+                    "enabled": true,
+                    "fingerprint": "chrome"
+                },
+                "reality": {
+                    "enabled": true,
+                    "public_key": "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg",
+                    "short_id": "abcd"
+                }
+            }
+        },
+        {
+            "tag": "vmess",
+            "server": "vmess.example.com",
+            "server_port": 443,
+            "type": "vmess",
+            "uuid": "00000000-0000-0000-0000-000000000002",
+            "security": "auto",
+            "tls": {
+                "enabled": true,
+                "server_name": "vmess.example.com",
+                "utls": {
+                    "enabled": true,
+                    "fingerprint": "chrome"
+                }
+            },
+            "transport": {
+                "type": "ws",
+                "path": "\/ws",
+                "headers": {
+                    "Host": "vmess.example.com"
+                }
+            }
+        },
+        {
+            "tag": "trojan",
+            "server": "trojan.example.com",
+            "server_port": 443,
+            "type": "trojan",
+            "password": "pass",
+            "tls": {
+                "enabled": true,
+                "server_name": "trojan.example.com",
+                "utls": {
+                    "enabled": true,
+                    "fingerprint": "chrome"
+                }
+            }
+        },
+        {
+            "tag": "hy2",
+            "server": "198.51.100.20",
+            "server_port": 8443,
+            "type": "hysteria2",
+            "password": "secret",
+            "tls": {
+                "enabled": true,
+                "server_name": "hy2.example.com",
+                "alpn": [
+                    "h3"
+                ]
+            }
+        },
+        {
+            "tag": "ss",
+            "server": "198.51.100.9",
+            "server_port": 8388,
+            "type": "shadowsocks",
+            "method": "aes-256-gcm",
+            "password": "p"
+        },
+        {
+            "type": "selector",
+            "tag": "utgard",
+            "outbounds": [
+                "vless",
+                "vmess",
+                "trojan",
+                "hy2",
+                "ss",
+                "wg"
+            ],
+            "default": "hy2"
+        }
+    ],
+    "endpoints": [
+        {
+            "type": "wireguard",
+            "tag": "wg",
+            "address": [
+                "10.8.0.2\/32"
+            ],
+            "private_key": "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=",
+            "peers": [
+                {
+                    "address": "203.0.113.5",
+                    "port": 51820,
+                    "public_key": "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
+                    "allowed_ips": [
+                        "0.0.0.0\/0",
+                        "::\/0"
+                    ]
+                }
+            ]
+        }
+    ],
+    "route": {
+        "auto_detect_interface": true,
+        "default_domain_resolver": "local",
+        "final": "direct",
+        "rules": [
+            {
+                "action": "sniff"
+            },
+            {
+                "protocol": "dns",
+                "action": "hijack-dns"
+            },
+            {
+                "action": "route",
+                "outbound": "direct",
+                "domain": [
+                    "vless.example.com",
+                    "vmess.example.com",
+                    "trojan.example.com"
+                ]
+            },
+            {
+                "action": "route",
+                "outbound": "direct",
+                "ip_cidr": [
+                    "198.51.100.20\/32",
+                    "198.51.100.9\/32",
+                    "203.0.113.5\/32"
+                ]
+            },
+            {
+                "action": "route",
+                "outbound": "direct",
+                "ip_is_private": true
+            },
+            {
+                "action": "route",
+                "outbound": "direct",
+                "ip_cidr": [
+                    "100.64.0.0\/10"
+                ]
+            },
+            {
+                "process_name": [
+                    "openvpn.exe",
+                    "openvpn-gui.exe"
+                ],
+                "action": "route",
+                "outbound": "direct"
+            },
+            {
+                "domain_suffix": [
+                    "corp.example"
+                ],
+                "action": "route",
+                "outbound": "direct"
+            },
+            {
+                "process_name": [
+                    "game.exe"
+                ],
+                "action": "route",
+                "outbound": "direct"
+            },
+            {
+                "action": "route",
+                "outbound": "utgard",
+                "rule_set": [
+                    "general"
+                ]
+            }
+        ],
+        "rule_set": [
+            {
+                "type": "local",
+                "tag": "general",
+                "format": "binary",
+                "path": "list\/general.srs"
+            }
+        ]
+    },
+    "log": {
+        "level": "warn",
+        "timestamp": true,
+        "output": "logs\/sing-box.log"
+    },
+    "inbounds": [
+        {
+            "type": "tun",
+            "tag": "tun-in",
+            "address": [
+                "172.30.30.1\/30"
+            ],
+            "mtu": 1400,
+            "auto_route": true,
+            "strict_route": false,
+            "stack": "gvisor",
+            "interface_name": "utgard-sing-box-tun"
+        }
+    ]
+}

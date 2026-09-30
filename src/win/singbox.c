@@ -9,12 +9,7 @@
 #include "fileio.h"
 #include <strsafe.h>
 #include <string.h>
-
-static int say(wchar_t *msg, size_t cap, const wchar_t *text)
-{
-    if (msg && cap) StringCchCopyW(msg, cap, text);
-    return 0;
-}
+#include "winmsg.h"
 
 /* ---- layout --------------------------------------------------------- */
 

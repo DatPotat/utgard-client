@@ -3,14 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 
-static int write_base(void)
-{
-    FILE *f = fopen("build/config.default.json", "wb");
-    if (!f) return 0;
-    fwrite(utgard_default_config, 1, utgard_default_config_len, f);
-    fclose(f);
-    return 1;
-}
 
 int main(void)
 {
@@ -28,8 +20,8 @@ int main(void)
     store.items[0].link.port = 443;
     strcpy(store.items[0].link.method, "aes-128-gcm");
     strcpy(store.items[0].link.password, "test-only-password");
-    if (!write_base()) return 5;
-    input.base_path = "build/config.default.json";
+    input.base.name = "config.json";
+    input.base.text = utgard_default_config;
     input.rule_set_path = "build/general.srs";
     input.store = &store;
     input.pac_port = 32101;

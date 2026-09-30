@@ -144,7 +144,7 @@ void rounded_r(HDC dc, const RECT *r, COLORREF fillc, COLORREF border, int radiu
         p_GdipDeleteBrush((GpBrush *)b);
         p_GdipDeletePath(p);
         if (border != fillc) {
-            float  lw = (float)S(1);
+            float  lw = (float)scaled(1);
             GpPen *pen = NULL;
             p_GdipCreatePath(FillModeAlternate, &p);
             add_round(p, x + lw / 2, y + lw / 2, w - lw, h - lw, (float)radius - lw / 2);
@@ -158,7 +158,7 @@ void rounded_r(HDC dc, const RECT *r, COLORREF fillc, COLORREF border, int radiu
     }
     {
         HBRUSH  br  = CreateSolidBrush(fillc);
-        HPEN    pen = CreatePen(PS_SOLID, S(1), border);
+        HPEN    pen = CreatePen(PS_SOLID, scaled(1), border);
         HGDIOBJ ob = SelectObject(dc, br), op = SelectObject(dc, pen);
         RoundRect(dc, r->left, r->top, r->right, r->bottom, radius * 2, radius * 2);
         SelectObject(dc, ob); SelectObject(dc, op);

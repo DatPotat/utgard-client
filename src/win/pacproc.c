@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "winmsg.h"
 
 #ifndef UTGARD_PAC_HELPER_SHA
 #define UTGARD_PAC_HELPER_SHA ""
@@ -16,12 +17,6 @@
 static SRWLOCK reload_lock = SRWLOCK_INIT;
 static HANDLE reload_pipe;
 static volatile LONG reload_drop;   /* VPN went off during a reload: close after it */
-
-static int say(wchar_t *err, size_t cap, const wchar_t *text)
-{
-    if (err && cap) StringCchCopyW(err, cap, text);
-    return 0;
-}
 
 static int read_all(HANDLE h, void *data, DWORD length)
 {

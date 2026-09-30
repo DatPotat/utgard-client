@@ -38,14 +38,14 @@ int menu_measure(MEASUREITEMSTRUCT *mi)
 
     if (mi->CtlType != ODT_MENU) return 0;
     text = (const wchar_t *)mi->itemData;
-    if (!text) { mi->itemWidth = (UINT)S(40); mi->itemHeight = (UINT)S(9); return 1; }
+    if (!text) { mi->itemWidth = (UINT)scaled(40); mi->itemHeight = (UINT)scaled(9); return 1; }
     dc = GetDC(NULL);
     old = SelectObject(dc, g_font);
     GetTextExtentPoint32W(dc, text, (int)wcslen(text), &sz);
     SelectObject(dc, old);
     ReleaseDC(NULL, dc);
-    mi->itemWidth  = (UINT)(sz.cx + S(40));
-    mi->itemHeight = (UINT)S(36);
+    mi->itemWidth  = (UINT)(sz.cx + scaled(40));
+    mi->itemHeight = (UINT)scaled(36);
     return 1;
 }
 
@@ -64,15 +64,15 @@ int menu_draw(const DRAWITEMSTRUCT *d)
     FillRect(d->hDC, &r, back);
     DeleteObject(back);
     if (!text) {
-        fill(d->hDC, r.left + S(8), (r.top + r.bottom) / 2, r.right - r.left - S(16), S(1), g_brush_line);
+        fill(d->hDC, r.left + scaled(8), (r.top + r.bottom) / 2, r.right - r.left - scaled(16), scaled(1), g_brush_line);
         return 1;
     }
     if (sel) {
         RECT h = r;
-        InflateRect(&h, -S(4), -S(2));
-        rounded_r(d->hDC, &h, CLR_TINT, CLR_TINT, S(6));
+        InflateRect(&h, -scaled(4), -scaled(2));
+        rounded_r(d->hDC, &h, CLR_TINT, CLR_TINT, scaled(6));
     }
-    text_at(d->hDC, r.left + S(16), r.top, r.right - r.left - S(24), r.bottom - r.top, text,
+    text_at(d->hDC, r.left + scaled(16), r.top, r.right - r.left - scaled(24), r.bottom - r.top, text,
             gray ? CLR_MUTED : CLR_TEXT, g_font, DT_LEFT | DT_END_ELLIPSIS);
     return 1;
 }

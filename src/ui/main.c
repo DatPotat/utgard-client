@@ -12,122 +12,18 @@
 
 /* ---- shared state: every module sees it through the externs in ui.h -- */
 
-int    g_dpi  = USER_DEFAULT_SCREEN_DPI;
-
 int    g_page = PAGE_UTGARD;
 
-HFONT  g_font, g_font_big, g_font_small;
-HFONT  g_font_bold, g_font_small_bold, g_font_title, g_font_deco, g_font_meta;
-HWND   g_set_adv;
-HWND   g_sel[SEL_COUNT];
-int    g_set_adv_open;
-HWND   g_zap_search, g_zap_again, g_zg[4], g_zi[3];
-HWND   g_nav[NAV_COUNT], g_row_server, g_tab_sites, g_tab_apps, g_tab_pac, g_set_theme;
+HWND g_nav[NAV_COUNT];
 
-HBRUSH g_brush_bg, g_brush_footer, g_brush_surface, g_brush_line;
-
-HWND g_toggle, g_pick_path, g_list;
-
-HWND g_zap_start, g_zap_stop, g_zap_restart;
-
-HWND g_plist, g_prof_add, g_prof_del, g_prof_sub;
-
-int  g_sub_busy;
-
-/* -2 not measured yet, -1 unreachable, otherwise milliseconds. Not stored:
-   a latency from last week would be a lie. */
-int g_ping[PROFILES_MAX];
-
-int g_ping_gen;      /* results from an older list are discarded */
-
-int g_ping_busy;
-
-int g_vpn_on;
-
-int g_installing;
-int g_awg_lost;
-int g_awg_ready;
-int g_switch_pending = -1;
-int g_switch_note;
-
-HWND g_btn_hosts, g_btn_apps, g_btn_pac, g_zap_fix;
-HWND g_pac_list, g_pac_back, g_pac_file, g_pac_url, g_pac_toggle;
-HWND g_pac_refresh, g_pac_delete, g_pac_help;
-
-HWND g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts, g_tip;
-
-HWND g_alist, g_app_back, g_app_pick, g_app_manual;
-
-WNDPROC   g_alist_prev;
-
-app_entry g_appv[APPS_MAX];
-
-int       g_appv_n;
-
-int       g_app_hover_item = -1;   /* row under the cursor, -1 if none */
-
-int       g_app_hover_zone = -1;   /* 0 name, 1 enable/disable, 2 delete */
-
-HWND      g_hedit, g_h_back, g_h_tidy, g_h_save;
-
-int       g_hosts_mode;
-
-HWND      g_pk_search, g_pk_list, g_pk_back, g_pk_save;
-
-pick_proc g_pk_all[PICK_MAX];
-
-int       g_pk_view[PICK_MAX];     /* indices into g_pk_all after filtering */
-
-int       g_pk_view_n;
-
-int       g_pk_checked_n;
-
-HWND    g_ed_name[ED_ROWS], g_ed_nplus[ED_ROWS], g_ed_nminus[ED_ROWS];
-
-HWND    g_ed_path[ED_ROWS], g_ed_pplus[ED_ROWS], g_ed_pminus[ED_ROWS], g_ed_pbrowse[ED_ROWS];
-
-HWND    g_ed_back, g_ed_save;
-
-int     g_ed_ncount = 1, g_ed_pcount = 1;
-
-wchar_t g_ed_orig[APPS_NAME_MAX];     /* empty when creating */
-
-app_settings g_set;
+HWND g_tip;
 
 static UINT         g_taskbar_created;   /* Explorer restarted */
 
-HWND    g_set_open, g_set_mtu, g_set_log, g_set_back, g_set_save;
-
-HWND    g_set_upd, g_set_upd_now;
-HWND    g_set_v_utgard, g_set_v_singbox, g_set_v_awg;
-
-HWND    g_set_stack, g_set_dns, g_set_tray, g_set_auto, g_set_sub, g_ping_now, g_zap_list;
-
-long long g_sub_retry;   /* after a failed automatic refresh, not before */
-
-int  g_exc_known, g_exc_present;
-
-int  g_zap_dirty;   /* Game Filter changed: it lives in winws arguments; lists are reread live */
-
-int            g_busy;        /* a background job is running */
-
-const wchar_t *g_busy_text;   /* what it is doing, for the status line */
-
-int  g_host_count, g_app_count, g_pac_count;
-pac_status_record g_pac_status;
-int g_pac_status_valid;
-
-profile_store g_prof;
 /* Set by WM_CREATE, reported once the window exists: a message box inside
    WM_CREATE would run a modal loop before the window is fully built. */
 static int     g_prof_unreadable;
 static wchar_t g_prof_aside[MAX_PATH * 2];
-
-HFONT g_font_mono;
-
-zapret_info   g_zap;
-
-zapret_status g_status;
 
 static void pac_unreadable_notice(HWND hwnd)
 {
@@ -142,8 +38,6 @@ static void pac_unreadable_notice(HWND hwnd)
             L"Не удалось прочитать файл PAC и переименовать его. Чтобы не потерять его, настройки PAC не будут сохраняться до перезапуска Utgard.");
     problem(hwnd, text);
 }
-
-int     g_count;
 
 /* Shown on hover over "Как работает PAC"; describes what the code does
    now: any PROXY wins, errors go DIRECT, lists and apps come first. */
@@ -204,9 +98,6 @@ static const wchar_t TIP_HOSTS[] =
     L"Update Hosts File — обновление файла hosts для починки веб-версии "
     L"телеграма и подключения к голосовому чату Discord.";
 
-int  g_upd_pending;     /* found while hidden in the tray: ask on show */
-int  g_awg_after_singbox; /* AmneziaWG said yes at start while sing-box downloads */
-
 static void window_show(HWND hwnd)
 {
     ShowWindow(hwnd, IsIconic(hwnd) ? SW_RESTORE : SW_SHOW);
@@ -252,7 +143,7 @@ static void set_fonts(void)
     SendMessageW(g_set_theme,  WM_SETFONT, (WPARAM)g_font, TRUE);
     hl_fonts();
     if (g_tip) {
-        RECT m = { S(12), S(8), S(12), S(8) };
+        RECT m = { scaled(12), scaled(8), scaled(12), scaled(8) };
         SendMessageW(g_tip, WM_SETFONT, (WPARAM)g_font_small, TRUE);
         SendMessageW(g_tip, TTM_SETMARGIN, 0, (LPARAM)&m);
     }
@@ -352,257 +243,14 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         for (k = 0; k < NAV_COUNT; k++)
             g_nav[k] = make_button(hwnd, names[k], ID_NAV_FIRST + k, BK_NAV);
     }
-    g_row_server = make_button_on(hwnd, L"", ID_ROW_SERVER, BK_ROW, BACK_CARD);
-    g_tab_sites  = make_button(hwnd, L"Сайты", ID_TAB_SITES, BK_TAB);
-    g_tab_apps   = make_button(hwnd, L"Приложения", ID_TAB_APPS, BK_TAB);
-    g_tab_pac    = make_button(hwnd, L"Правила PAC", ID_TAB_PAC, BK_TAB);
-    g_ping_now   = make_button(hwnd, L"Проверить задержку", ID_PING_NOW, BK_SECONDARY);
-    {
-        HINSTANCE inst = (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE);
-        int i;
-
-        g_set_mtu = CreateWindowExW(0, L"EDIT", L"",
-            WS_CHILD | WS_TABSTOP | ES_NUMBER | ES_CENTER, 0, 0, 0, 0, hwnd,
-            (HMENU)(INT_PTR)ID_SET_MTU, inst, NULL);
-        SendMessageW(g_set_mtu, EM_SETLIMITTEXT, 4, 0);
-
-        /* A drop-down list, not an editable combo: only real levels go in.
-           DarkMode_CFD is the theme that darkens combo boxes. */
-        g_set_log = CreateWindowExW(0, L"COMBOBOX", NULL,
-            WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0,
-            hwnd, (HMENU)(INT_PTR)ID_SET_LOG, inst, NULL);
-        SetWindowTheme(g_set_log, L"DarkMode_CFD", NULL);
-        {
-            static const wchar_t *labels[] = {
-                L"trace — всё подряд",
-                L"debug — подробно, для разбора проблем",
-                L"info — обычная работа",
-                L"warn — предупреждения и ошибки",
-                L"error — только ошибки",
-                L"fatal — только критические ошибки",
-                L"panic — почти ничего"
-            };
-            for (i = 0; i < 7; i++)
-                SendMessageW(g_set_log, CB_ADDSTRING, 0, (LPARAM)labels[i]);
-        }
-        g_set_stack = CreateWindowExW(0, L"COMBOBOX", NULL,
-            WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0,
-            hwnd, (HMENU)(INT_PTR)ID_SET_STACK, inst, NULL);
-        SetWindowTheme(g_set_stack, L"DarkMode_CFD", NULL);
-        SendMessageW(g_set_stack, CB_ADDSTRING, 0, (LPARAM)L"system — стек Windows");
-        SendMessageW(g_set_stack, CB_ADDSTRING, 0, (LPARAM)L"gvisor — стек sing-box");
-        SendMessageW(g_set_stack, CB_ADDSTRING, 0, (LPARAM)L"mixed — TCP system, UDP gvisor");
-
-        g_set_dns = CreateWindowExW(0, L"COMBOBOX", NULL,
-            WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0,
-            hwnd, (HMENU)(INT_PTR)ID_SET_DNS, inst, NULL);
-        SetWindowTheme(g_set_dns, L"DarkMode_CFD", NULL);
-        for (i = 0; i < settings_dns_count; i++) {
-            SendMessageW(g_set_dns, CB_ADDSTRING, 0, (LPARAM)settings_dns[i].label);
-        }
-
-        g_set_sub = CreateWindowExW(0, L"COMBOBOX", NULL,
-            WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0,
-            hwnd, (HMENU)(INT_PTR)ID_SET_SUB, inst, NULL);
-        SetWindowTheme(g_set_sub, L"DarkMode_CFD", NULL);
-        for (i = 0; i < settings_sub_count; i++) {
-            wchar_t line[64];
-            int     h = settings_sub_hours[i];
-            /* Russian plural: 3 часа, 6 и 12 часов. */
-            StringCchPrintfW(line, 64, L"обновлять каждые %d %s", h,
-                             (h % 10 >= 2 && h % 10 <= 4 && (h % 100 < 12 || h % 100 > 14))
-                                 ? L"часа" : L"часов");
-            SendMessageW(g_set_sub, CB_ADDSTRING, 0, (LPARAM)line);
-        }
-
-        g_set_theme = CreateWindowExW(0, L"COMBOBOX", NULL,
-            WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0,
-            hwnd, (HMENU)(INT_PTR)ID_SET_THEME, inst, NULL);
-
-        g_set_tray = make_button_on(hwnd, L"Сворачивать в трей при закрытии",
-                                 ID_SET_TRAY, BK_CHECK, BACK_CARD);
-        g_set_auto = make_button_on(hwnd, L"Запускать вместе с Windows",
-                                 ID_SET_AUTO, BK_CHECK, BACK_CARD);
-        g_set_upd  = make_button_on(hwnd, L"Сообщать о новых версиях",
-                                 ID_SET_UPD, BK_CHECK, BACK_CARD);
-        g_set_upd_now = make_button(hwnd, L"Проверить обновления", ID_SET_UPD_NOW,
-                                    BK_SECONDARY);
-        /* The versions in use, each a link to its own release page. */
-        g_set_v_utgard  = make_button_on(hwnd, L"Utgard " UTGARD_VERSION_W, ID_SET_V_UTGARD, BK_LINK, BACK_CARD);
-        g_set_v_singbox = make_button_on(hwnd, L"", ID_SET_V_SINGBOX, BK_LINK, BACK_CARD);
-        g_set_v_awg     = make_button_on(hwnd, L"", ID_SET_V_AWG, BK_LINK, BACK_CARD);
-
-        g_set_adv  = make_button_on(hwnd, L"", ID_SET_ADV, BK_ROW, BACK_CARD);
-        {
-            /* Each drop-down field stands for a hidden combo box. */
-            HWND combos[SEL_COUNT];
-            int  k;
-            combos[SEL_DNS] = g_set_dns; combos[SEL_SUB] = g_set_sub; combos[SEL_THEME] = g_set_theme;
-            combos[SEL_LOG] = g_set_log; combos[SEL_STACK] = g_set_stack;
-            for (k = 0; k < SEL_COUNT; k++) {
-                g_sel[k] = make_button_on(hwnd, L"", ID_SEL_FIRST + k, BK_SELECT, BACK_CARD);
-                SetPropW(g_sel[k], L"utgard.combo", (HANDLE)combos[k]);
-            }
-        }
-        g_set_back = make_button_on(hwnd, L"Назад", ID_SET_BACK, BK_SECONDARY, BACK_FOOTER);
-        g_set_save = make_button_on(hwnd, L"Сохранить", ID_SET_SAVE, BK_PRIMARY, BACK_FOOTER);
-    }
-    g_toggle     = make_button(hwnd, L"Включить", ID_TOGGLE, BK_PRIMARY);
-    g_pick_path  = make_button(hwnd, L"Указать папку…", ID_PICK_PATH, BK_SECONDARY);
-    g_list = CreateWindowExW(0, L"LISTBOX", NULL,
-                             WS_CHILD | WS_VSCROLL | WS_TABSTOP |
-                             LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY,
-                             0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_STRATEGIES,
-                             (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
-                             NULL);
-    SendMessageW(g_list, LB_SETITEMHEIGHT, 0, (LPARAM)S(30));
-    /* Dark scrollbar: undocumented since Windows 10 1809, and a no-op
-       where the theme is absent. */
-    SetWindowTheme(g_list, L"DarkMode_Explorer", NULL);
-    list_hover_attach(g_list);
-    g_plist = CreateWindowExW(0, L"LISTBOX", NULL,
-                              WS_CHILD | WS_VSCROLL | WS_TABSTOP |
-                              LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY,
-                              0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_PROFILES,
-                              (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
-                              NULL);
-    SendMessageW(g_plist, LB_SETITEMHEIGHT, 0, (LPARAM)S(44));
-    SetWindowTheme(g_plist, L"DarkMode_Explorer", NULL);
-    list_hover_attach(g_plist);
-    g_prof_add = make_button_on(hwnd, L"Добавить сервер…", ID_PROF_ADD,
-                                BK_PRIMARY, BACK_PAGE);
-    g_prof_del = make_button_on(hwnd, L"Удалить", ID_PROF_DEL,
-                                BK_DANGER, BACK_PAGE);
-    g_prof_sub = make_button_on(hwnd, L"Подписка…", ID_PROF_SUB,
-                                BK_SECONDARY, BACK_PAGE);
-    g_alist = CreateWindowExW(0, L"LISTBOX", NULL,
-                              WS_CHILD | WS_VSCROLL | WS_TABSTOP |
-                              LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY,
-                              0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_APPS_LIST,
-                              (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
-                              NULL);
-    SendMessageW(g_alist, LB_SETITEMHEIGHT, 0, (LPARAM)S(34));
-    SetWindowTheme(g_alist, L"DarkMode_Explorer", NULL);
-    g_alist_prev = (WNDPROC)SetWindowLongPtrW(g_alist, GWLP_WNDPROC,
-                                              (LONG_PTR)alist_proc);
-    g_app_back   = make_button_on(hwnd, L"Назад", ID_APPS_BACK,
-                                  BK_SECONDARY, BACK_FOOTER);
-    g_app_pick   = make_button_on(hwnd, L"Выбрать из запущенных…",
-                                  ID_APPS_PICK, BK_PRIMARY, BACK_PAGE);
-    g_app_manual = make_button_on(hwnd, L"Добавить вручную…",
-                                  ID_APPS_MANUAL, BK_SECONDARY, BACK_PAGE);
-    g_hedit = CreateWindowExW(0, L"EDIT", L"",
-                              WS_CHILD | WS_TABSTOP | WS_VSCROLL |
-                              ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
-                              0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_HOSTS_EDIT,
-                              (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
-                              NULL);
-    SendMessageW(g_hedit, EM_SETLIMITTEXT, (WPARAM)(LIST_TEXT_MAX - 1), 0);
-    SetWindowTheme(g_hedit, L"DarkMode_Explorer", NULL);
-    g_pk_search = CreateWindowExW(0, L"EDIT", L"",
-                                  WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL,
-                                  0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_PICK_SEARCH,
-                                  (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
-                                  NULL);
-    g_pk_list = CreateWindowExW(0, L"LISTBOX", NULL,
-                                WS_CHILD | WS_VSCROLL | WS_TABSTOP |
-                                LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY,
-                                0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_PICK_LIST,
-                                (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
-                                NULL);
-    SendMessageW(g_pk_list, LB_SETITEMHEIGHT, 0, (LPARAM)S(40));
-    SetWindowTheme(g_pk_list, L"DarkMode_Explorer", NULL);
-    list_hover_attach(g_pk_list);
-    {
-        HINSTANCE inst = (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE);
-        int i;
-        for (i = 0; i < ED_ROWS; i++) {
-            g_ed_name[i] = CreateWindowExW(0, L"EDIT", L"",
-                WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0, hwnd,
-                (HMENU)(INT_PTR)(ID_ED_NAME + i), inst, NULL);
-            g_ed_path[i] = CreateWindowExW(0, L"EDIT", L"",
-                WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0, hwnd,
-                (HMENU)(INT_PTR)(ID_ED_PATH + i), inst, NULL);
-            SendMessageW(g_ed_name[i], EM_SETLIMITTEXT, MAX_PATH - 1, 0);
-            SendMessageW(g_ed_path[i], EM_SETLIMITTEXT, MAX_PATH - 1, 0);
-            g_ed_pbrowse[i] = make_button_on(hwnd, L"Выбрать exe-файл…", ID_ED_PBROWSE + i,
-                                             BK_ICON, BACK_CARD);
-            g_ed_nplus[i]  = make_button(hwnd, L"+", ID_ED_NPLUS + i, BK_SECONDARY);
-            g_ed_nminus[i] = make_button(hwnd, L"−", ID_ED_NMINUS + i, BK_DANGER);
-            g_ed_pplus[i]  = make_button(hwnd, L"+", ID_ED_PPLUS + i, BK_SECONDARY);
-            g_ed_pminus[i] = make_button(hwnd, L"−", ID_ED_PMINUS + i, BK_DANGER);
-        }
-        g_ed_back = make_button_on(hwnd, L"Назад", ID_ED_BACK, BK_SECONDARY, BACK_FOOTER);
-        g_ed_save = make_button_on(hwnd, L"Сохранить", ID_ED_SAVE, BK_PRIMARY, BACK_FOOTER);
-    }
-    g_pk_back = make_button_on(hwnd, L"Назад", ID_PICK_BACK, BK_SECONDARY, BACK_FOOTER);
-    g_pk_save = make_button_on(hwnd, L"Сохранить приложение", ID_PICK_SAVE,
-                               BK_PRIMARY, BACK_FOOTER);
-    g_h_back = make_button_on(hwnd, L"Назад", ID_HOSTS_BACK, BK_SECONDARY, BACK_PAGE);
-    g_h_tidy = make_button_on(hwnd, L"Убрать дубли", ID_HOSTS_TIDY,
-                              BK_SECONDARY, BACK_PAGE);
-    g_h_save = make_button_on(hwnd, L"Сохранить", ID_HOSTS_SAVE, BK_PRIMARY, BACK_PAGE);
+    settings_create(hwnd);
+    zapret_create_list(hwnd);
+    servers_create(hwnd);
+    lists_create(hwnd);
     hl_create(hwnd);
-    g_btn_hosts = make_button_on(hwnd, L"Сайты", ID_EDIT_HOSTS, BK_ROW, BACK_CARD);
-    g_btn_apps  = make_button_on(hwnd, L"Приложения", ID_EDIT_APPS, BK_ROW, BACK_CARD);
-    g_btn_pac   = make_button_on(hwnd, L"Правила PAC", ID_PAC, BK_ROW, BACK_CARD);
-    {
-        LVCOLUMNW column;
-        static const wchar_t *titles[] = { L"Источник", L"Тип", L"Состояние" };
-        static const int widths[] = { 300, 70, 160 };
-        int i;
-        INITCOMMONCONTROLSEX icc = { sizeof icc, ICC_LISTVIEW_CLASSES };
-        InitCommonControlsEx(&icc);
-        g_pac_list = CreateWindowExW(0, WC_LISTVIEWW, NULL,
-            WS_CHILD | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
-            0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_PAC_LIST,
-            (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE), NULL);
-        ListView_SetExtendedListViewStyle(g_pac_list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
-        /* Drawn like the servers table: the page paints the headings, each
-           row is drawn whole (pac_row_draw); the columns only hold the text.
-           A one-pixel-wide image list sets the row height. */
-        SetWindowLongPtrW(g_pac_list, GWL_STYLE, GetWindowLongPtrW(g_pac_list, GWL_STYLE) | LVS_NOCOLUMNHEADER);
-        ListView_SetImageList(g_pac_list, ImageList_Create(1, S(44), ILC_COLOR32, 1, 0), LVSIL_SMALL);
-        SetWindowTheme(g_pac_list, L"DarkMode_Explorer", NULL);
-        ListView_SetBkColor(g_pac_list, CLR_SURFACE);
-        ListView_SetTextBkColor(g_pac_list, CLR_SURFACE);
-        ListView_SetTextColor(g_pac_list, CLR_TEXT);
-        SetWindowSubclass(g_pac_list, pac_list_proc, 1, 0);
-        ZeroMemory(&column, sizeof column);
-        column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
-        for (i = 0; i < 3; i++) {
-            column.iSubItem = i; column.pszText = (LPWSTR)titles[i]; column.cx = S(widths[i]);
-            ListView_InsertColumn(g_pac_list, i, &column);
-        }
-    }
-    g_pac_back = make_button_on(hwnd, L"Назад", ID_PAC_BACK, BK_SECONDARY, BACK_FOOTER);
-    g_pac_file = make_button_on(hwnd, L"Добавить файл…", ID_PAC_FILE, BK_SECONDARY, BACK_PAGE);
-    g_pac_url = make_button_on(hwnd, L"Добавить по адресу…", ID_PAC_URL, BK_PRIMARY, BACK_PAGE);
-    g_pac_toggle = make_button(hwnd, L"Включить / выключить", ID_PAC_TOGGLE, BK_SECONDARY);
-    g_pac_refresh = make_button(hwnd, L"Обновить", ID_PAC_REFRESH, BK_SECONDARY);
-    g_pac_delete = make_button(hwnd, L"Удалить", ID_PAC_DELETE, BK_DANGER);
-    g_pac_help = make_button(hwnd, L"Как работает PAC", ID_PAC_HELP, BK_LINK);
-    g_zap_start   = make_button(hwnd, L"Запустить выбранную", ID_ZAP_START, BK_PRIMARY);
-    g_zap_stop    = make_button_on(hwnd, L"Выключить", ID_ZAP_STOP, BK_SECONDARY, BACK_ACCENT);
-    g_zap_restart = make_button_on(hwnd, L"Перезапустить", ID_ZAP_RESTART, BK_SECONDARY, BACK_ACCENT);
-    g_zap_fix = make_button_on(hwnd, L"Исправить", ID_ZAP_FIX, BK_PRIMARY, BACK_CARD);
-    g_zap_game  = make_button(hwnd, L"Game filter", ID_ZAP_GAME, BK_SECONDARY);
-    g_zap_ipset = make_button(hwnd, L"IPSet filter", ID_ZAP_IPSET, BK_SECONDARY);
-    g_zap_ipupd = make_button_on(hwnd, L"Обновить", ID_ZAP_IPUPD, BK_SECONDARY, BACK_CARD);
-    g_zap_hosts = make_button_on(hwnd, L"Проверить", ID_ZAP_HOSTS, BK_SECONDARY, BACK_CARD);
-    g_zap_list  = make_button_on(hwnd, L"Сайты для zapret", ID_ZAP_LIST, BK_ROW, BACK_CARD);
-    {
-        static const wchar_t *game[4] = { L"Выкл.", L"TCP и UDP", L"TCP", L"UDP" };
-        static const wchar_t *ipset[3] = { L"Выкл.", L"По списку", L"Любой адрес" };
-        int k;
-        for (k = 0; k < 4; k++) g_zg[k] = make_button_on(hwnd, game[k], ID_ZG_FIRST + k, BK_CHIP, BACK_CARD);
-        for (k = 0; k < 3; k++) g_zi[k] = make_button_on(hwnd, ipset[k], ID_ZI_FIRST + k, BK_CHIP, BACK_CARD);
-    }
-    g_zap_again = make_button_on(hwnd, L"Перезапустить", ID_ZAP_AGAIN, BK_SECONDARY, BACK_TINT);
-    g_zap_search = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL,
-                                   0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_ZAP_SEARCH,
-                                   (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE), NULL);
-    ask_edit_center(g_zap_search);
+    connect_create(hwnd);
+    pac_create(hwnd);
+    zapret_create(hwnd);
 
     {
         /* Rect-based tooltips on the parent: the "что это?" labels are
@@ -626,7 +274,7 @@ static LRESULT on_create(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                                 (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
                                 NULL);
         if (g_tip) {
-            SendMessageW(g_tip, TTM_SETMAXTIPWIDTH, 0, (LPARAM)S(360));
+            SendMessageW(g_tip, TTM_SETMAXTIPWIDTH, 0, (LPARAM)scaled(360));
             /* Unthemed, so the app draws it whole (NM_CUSTOMDRAW below). */
             SetWindowTheme(g_tip, L"", L"");
             ZeroMemory(&ti, sizeof ti);
@@ -1171,8 +819,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         fonts_destroy();
         fonts_create();
         set_fonts();
-        SendMessageW(g_list,  LB_SETITEMHEIGHT, 0, (LPARAM)S(30));
-        SendMessageW(g_plist, LB_SETITEMHEIGHT, 0, (LPARAM)S(44));
+        SendMessageW(g_list,  LB_SETITEMHEIGHT, 0, (LPARAM)scaled(30));
+        SendMessageW(g_plist, LB_SETITEMHEIGHT, 0, (LPARAM)scaled(44));
         theme_ask();
         SetWindowPos(hwnd, NULL, sug->left, sug->top,
                      sug->right - sug->left, sug->bottom - sug->top,
@@ -1202,7 +850,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_GETMINMAXINFO: {
         MINMAXINFO *mm = (MINMAXINFO *)lp;
         RECT        want = { 0, 0, 0, 0 };
-        want.right = S(WIN_W_MIN); want.bottom = S(WIN_H_MIN);
+        want.right = scaled(WIN_W_MIN); want.bottom = scaled(WIN_H_MIN);
         AdjustWindowRectExForDpi(&want, WS_OVERLAPPEDWINDOW, FALSE, 0, (UINT)g_dpi);
         mm->ptMinTrackSize.x = want.right - want.left;
         mm->ptMinTrackSize.y = want.bottom - want.top;
@@ -1219,7 +867,6 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         return 0;
     }
-
 
     case WM_ERASEBKGND:
         return 1;
@@ -1307,10 +954,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
         /* The design size, trimmed to the work area: at 250% on a 1080p
            screen even the minimum does not fit, and the page scrolls. */
         RECT work;
-        int  w = S(WIN_W_DEF), h = S(WIN_H_DEF);
+        int  w = scaled(WIN_W_DEF), h = scaled(WIN_H_DEF);
         if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0)) {
             if (w > work.right - work.left) w = work.right - work.left;
-            if (h > work.bottom - work.top - S(40)) h = work.bottom - work.top - S(40);
+            if (h > work.bottom - work.top - scaled(40)) h = work.bottom - work.top - scaled(40);
         }
         want.left = 0; want.top = 0; want.right = w; want.bottom = h;
     }

@@ -5,6 +5,32 @@
 #include "ui.h"
 #include "pacstore.h"
 
+/* State owned by this file (declared in ui.h). */
+HWND g_tab_sites, g_tab_apps, g_tab_pac;
+
+/* State owned by this file (declared in ui.h). */
+app_entry g_appv[APPS_MAX];
+int g_appv_n;
+int g_app_hover_item = -1;   /* row under the cursor, -1 if none */
+int g_app_hover_zone = -1;   /* 0 name, 1 enable/disable, 2 delete */
+int g_hosts_mode;
+pick_proc g_pk_all[PICK_MAX];
+int g_pk_view[PICK_MAX];     /* indices into g_pk_all after filtering */
+int g_pk_view_n;
+int g_pk_checked_n;
+int g_ed_ncount = 1, g_ed_pcount = 1;
+wchar_t g_ed_orig[APPS_NAME_MAX];     /* empty when creating */
+int g_host_count, g_app_count;
+
+/* Controls of this page, created by lists_create. */
+HWND g_alist, g_app_back, g_app_pick, g_app_manual;
+static WNDPROC g_alist_prev;
+HWND g_hedit, g_h_back, g_h_tidy, g_h_save;
+HWND g_pk_search, g_pk_list, g_pk_back, g_pk_save;
+HWND g_ed_name[ED_ROWS], g_ed_nplus[ED_ROWS], g_ed_nminus[ED_ROWS];
+HWND g_ed_path[ED_ROWS], g_ed_pplus[ED_ROWS], g_ed_pminus[ED_ROWS], g_ed_pbrowse[ED_ROWS];
+HWND g_ed_back, g_ed_save;
+
 static int ed_open_existing(HWND hwnd, const app_entry *e);
 
 static int       g_pk_all_n;
@@ -14,7 +40,7 @@ static wchar_t   g_pk_checked[64][MAX_PATH];  /* ticked, remembered by path */
 static int     g_ed_enabled;                 /* kept across an edit */
 
 /* Where the second section starts depends on how many rows the first has. */
-int ed_path_top(void) { return TABS_H + S(96) + g_ed_ncount * S(48) + S(32); }
+int ed_path_top(void) { return TABS_H + scaled(96) + g_ed_ncount * scaled(48) + scaled(32); }
 
 /* ---- list files ------------------------------------------------------
    All file access for the lists goes through Win32, not stdio: the product
@@ -691,4 +717,81 @@ void ed_save(HWND hwnd)
     g_page = PAGE_APPS;
     apps_reload();
     layout(hwnd);
+}
+
+/* The page's controls, in on_create's order: creation order is the
+   z-order and the tab order. */
+void lists_create(HWND hwnd)
+{
+    /* The routing page's tabs, before its lists. */
+    g_tab_sites  = make_button(hwnd, L"Сайты", ID_TAB_SITES, BK_TAB);
+    g_tab_apps   = make_button(hwnd, L"Приложения", ID_TAB_APPS, BK_TAB);
+    g_tab_pac    = make_button(hwnd, L"Правила PAC", ID_TAB_PAC, BK_TAB);
+    g_alist = CreateWindowExW(0, L"LISTBOX", NULL,
+                              WS_CHILD | WS_VSCROLL | WS_TABSTOP |
+                              LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY,
+                              0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_APPS_LIST,
+                              (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
+                              NULL);
+    SendMessageW(g_alist, LB_SETITEMHEIGHT, 0, (LPARAM)scaled(34));
+    SetWindowTheme(g_alist, L"DarkMode_Explorer", NULL);
+    g_alist_prev = (WNDPROC)SetWindowLongPtrW(g_alist, GWLP_WNDPROC,
+                                              (LONG_PTR)alist_proc);
+    g_app_back   = make_button_on(hwnd, L"Назад", ID_APPS_BACK,
+                                  BK_SECONDARY, BACK_FOOTER);
+    g_app_pick   = make_button_on(hwnd, L"Выбрать из запущенных…",
+                                  ID_APPS_PICK, BK_PRIMARY, BACK_PAGE);
+    g_app_manual = make_button_on(hwnd, L"Добавить вручную…",
+                                  ID_APPS_MANUAL, BK_SECONDARY, BACK_PAGE);
+    g_hedit = CreateWindowExW(0, L"EDIT", L"",
+                              WS_CHILD | WS_TABSTOP | WS_VSCROLL |
+                              ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
+                              0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_HOSTS_EDIT,
+                              (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
+                              NULL);
+    SendMessageW(g_hedit, EM_SETLIMITTEXT, (WPARAM)(LIST_TEXT_MAX - 1), 0);
+    SetWindowTheme(g_hedit, L"DarkMode_Explorer", NULL);
+    g_pk_search = CreateWindowExW(0, L"EDIT", L"",
+                                  WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL,
+                                  0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_PICK_SEARCH,
+                                  (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
+                                  NULL);
+    g_pk_list = CreateWindowExW(0, L"LISTBOX", NULL,
+                                WS_CHILD | WS_VSCROLL | WS_TABSTOP |
+                                LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY,
+                                0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_PICK_LIST,
+                                (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
+                                NULL);
+    SendMessageW(g_pk_list, LB_SETITEMHEIGHT, 0, (LPARAM)scaled(40));
+    SetWindowTheme(g_pk_list, L"DarkMode_Explorer", NULL);
+    list_hover_attach(g_pk_list);
+    {
+        HINSTANCE inst = (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE);
+        int i;
+        for (i = 0; i < ED_ROWS; i++) {
+            g_ed_name[i] = CreateWindowExW(0, L"EDIT", L"",
+                WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0, hwnd,
+                (HMENU)(INT_PTR)(ID_ED_NAME + i), inst, NULL);
+            g_ed_path[i] = CreateWindowExW(0, L"EDIT", L"",
+                WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0, hwnd,
+                (HMENU)(INT_PTR)(ID_ED_PATH + i), inst, NULL);
+            SendMessageW(g_ed_name[i], EM_SETLIMITTEXT, MAX_PATH - 1, 0);
+            SendMessageW(g_ed_path[i], EM_SETLIMITTEXT, MAX_PATH - 1, 0);
+            g_ed_pbrowse[i] = make_button_on(hwnd, L"Выбрать exe-файл…", ID_ED_PBROWSE + i,
+                                             BK_ICON, BACK_CARD);
+            g_ed_nplus[i]  = make_button(hwnd, L"+", ID_ED_NPLUS + i, BK_SECONDARY);
+            g_ed_nminus[i] = make_button(hwnd, L"−", ID_ED_NMINUS + i, BK_DANGER);
+            g_ed_pplus[i]  = make_button(hwnd, L"+", ID_ED_PPLUS + i, BK_SECONDARY);
+            g_ed_pminus[i] = make_button(hwnd, L"−", ID_ED_PMINUS + i, BK_DANGER);
+        }
+        g_ed_back = make_button_on(hwnd, L"Назад", ID_ED_BACK, BK_SECONDARY, BACK_FOOTER);
+        g_ed_save = make_button_on(hwnd, L"Сохранить", ID_ED_SAVE, BK_PRIMARY, BACK_FOOTER);
+    }
+    g_pk_back = make_button_on(hwnd, L"Назад", ID_PICK_BACK, BK_SECONDARY, BACK_FOOTER);
+    g_pk_save = make_button_on(hwnd, L"Сохранить приложение", ID_PICK_SAVE,
+                               BK_PRIMARY, BACK_FOOTER);
+    g_h_back = make_button_on(hwnd, L"Назад", ID_HOSTS_BACK, BK_SECONDARY, BACK_PAGE);
+    g_h_tidy = make_button_on(hwnd, L"Убрать дубли", ID_HOSTS_TIDY,
+                              BK_SECONDARY, BACK_PAGE);
+    g_h_save = make_button_on(hwnd, L"Сохранить", ID_HOSTS_SAVE, BK_PRIMARY, BACK_PAGE);
 }

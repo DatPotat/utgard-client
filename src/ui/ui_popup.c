@@ -38,26 +38,26 @@ static LRESULT CALLBACK pop_proc(HWND h, UINT m, WPARAM w, LPARAM l)
             FillRect(dc, &c, b);
             DeleteObject(b);
         }
-        if (!st->dwm_round) rounded_r(dc, &c, CLR_SURFACE, CLR_LINE, S(8));
+        if (!st->dwm_round) rounded_r(dc, &c, CLR_SURFACE, CLR_LINE, scaled(8));
         for (k = 0; k < st->n; k++) {
-            RECT r = { S(4), S(4) + k * S(POP_ITEM_H), c.right - S(4), S(4) + (k + 1) * S(POP_ITEM_H) };
-            if (k == st->hot) rounded_r(dc, &r, CLR_TINT, CLR_TINT, S(6));
-            text_at(dc, r.left + S(12), r.top, r.right - r.left - S(40), r.bottom - r.top, st->items[k],
+            RECT r = { scaled(4), scaled(4) + k * scaled(POP_ITEM_H), c.right - scaled(4), scaled(4) + (k + 1) * scaled(POP_ITEM_H) };
+            if (k == st->hot) rounded_r(dc, &r, CLR_TINT, CLR_TINT, scaled(6));
+            text_at(dc, r.left + scaled(12), r.top, r.right - r.left - scaled(40), r.bottom - r.top, st->items[k],
                     CLR_TEXT, k == st->current ? g_font_bold : g_font, DT_LEFT | DT_END_ELLIPSIS);
             if (k == st->current)
-                gfx_icon(dc, ICON_CHECK, r.right - S(28), (r.top + r.bottom) / 2 - S(8), S(16), CLR_ACCENT);
+                gfx_icon(dc, ICON_CHECK, r.right - scaled(28), (r.top + r.bottom) / 2 - scaled(8), scaled(16), CLR_ACCENT);
         }
         EndPaint(h, &ps);
         return 0;
     }
     case WM_MOUSEMOVE: {
-        int k = (GET_Y_LPARAM(l) - S(4)) / S(POP_ITEM_H);
+        int k = (GET_Y_LPARAM(l) - scaled(4)) / scaled(POP_ITEM_H);
         if (k < 0 || k >= st->n) k = -1;
         if (k != st->hot) { st->hot = k; InvalidateRect(h, NULL, FALSE); }
         return 0;
     }
     case WM_LBUTTONUP: {
-        int k = (GET_Y_LPARAM(l) - S(4)) / S(POP_ITEM_H);
+        int k = (GET_Y_LPARAM(l) - scaled(4)) / scaled(POP_ITEM_H);
         if (k >= 0 && k < st->n) st->done = k + 1;
         return 0;
     }
@@ -96,17 +96,17 @@ int popup_choose(HWND owner, const RECT *anchor, const wchar_t *const *items, in
         for (k = 0; k < n; k++) {
             SIZE sz = { 0, 0 };
             GetTextExtentPoint32W(dc, items[k], (int)wcslen(items[k]), &sz);
-            if (sz.cx + S(64) > w) w = sz.cx + S(64);
+            if (sz.cx + scaled(64) > w) w = sz.cx + scaled(64);
         }
         SelectObject(dc, old);
         ReleaseDC(owner, dc);
     }
-    ht = S(8) + n * S(POP_ITEM_H);
+    ht = scaled(8) + n * scaled(POP_ITEM_H);
     x  = align_right ? anchor->right - w : anchor->left;
-    y  = anchor->bottom + S(4);
+    y  = anchor->bottom + scaled(4);
     mi.cbSize = sizeof mi;
     if (GetMonitorInfoW(mon, &mi)) {
-        if (y + ht > mi.rcWork.bottom) y = anchor->top - S(4) - ht;
+        if (y + ht > mi.rcWork.bottom) y = anchor->top - scaled(4) - ht;
         if (x + w > mi.rcWork.right) x = mi.rcWork.right - w;
         if (x < mi.rcWork.left) x = mi.rcWork.left;
     }
@@ -129,7 +129,7 @@ int popup_choose(HWND owner, const RECT *anchor, const wchar_t *const *items, in
         if (st.dwm_round)
             DwmSetWindowAttribute(h, UTG_DWMWA_BORDER_COLOR, &border, sizeof border);
         else
-            SetWindowRgn(h, CreateRoundRectRgn(0, 0, w + 1, ht + 1, S(16), S(16)), FALSE);
+            SetWindowRgn(h, CreateRoundRectRgn(0, 0, w + 1, ht + 1, scaled(16), scaled(16)), FALSE);
     }
     ShowWindow(h, SW_SHOW);
     SetForegroundWindow(h);
@@ -197,7 +197,7 @@ LRESULT tip_draw(NMTTCUSTOMDRAW *cd)
         FillRect(cd->nmcd.hdc, &c, b);
         DeleteObject(b);
     }
-    rounded_r(cd->nmcd.hdc, &c, CLR_SURFACE, CLR_BORDER, S(8));
+    rounded_r(cd->nmcd.hdc, &c, CLR_SURFACE, CLR_BORDER, scaled(8));
     SendMessageW(cd->nmcd.hdr.hwndFrom, TTM_GETMARGIN, 0, (LPARAM)&m);
     t.left = c.left + m.left; t.top = c.top + m.top;
     t.right = c.right - m.right; t.bottom = c.bottom - m.bottom;
@@ -222,15 +222,15 @@ void tip_shape(HWND tip)
         return;
     }
     GetWindowRect(tip, &r);
-    SetWindowRgn(tip, CreateRoundRectRgn(0, 0, r.right - r.left + 1, r.bottom - r.top + 1, S(16), S(16)), TRUE);
+    SetWindowRgn(tip, CreateRoundRectRgn(0, 0, r.right - r.left + 1, r.bottom - r.top + 1, scaled(16), scaled(16)), TRUE);
 }
 
 /* ---- the PAC table, drawn like the servers table ------------------------- */
 
 void pac_columns(int width, int *x_type, int *x_state)
 {
-    *x_state = width - S(16) - S(180);
-    *x_type  = *x_state - S(16) - S(90);
+    *x_state = width - scaled(16) - scaled(180);
+    *x_type  = *x_state - scaled(16) - scaled(90);
 }
 
 LRESULT pac_row_draw(NMLVCUSTOMDRAW *cd)
@@ -265,16 +265,16 @@ LRESULT pac_row_draw(NMLVCUSTOMDRAW *cd)
     b = CreateSolidBrush(sel ? CLR_TINT : CLR_SURFACE);
     FillRect(cd->nmcd.hdc, &r, b);
     DeleteObject(b);
-    if (i) fill(cd->nmcd.hdc, r.left + S(16), r.top, w - S(32), S(1), g_brush_line);
+    if (i) fill(cd->nmcd.hdc, r.left + scaled(16), r.top, w - scaled(32), scaled(1), g_brush_line);
     ListView_GetItemText(lv, i, 0, src, 512);
     ListView_GetItemText(lv, i, 1, type, 32);
     ListView_GetItemText(lv, i, 2, state, 96);
     pac_columns(w, &xt, &xs);
-    text_at(cd->nmcd.hdc, r.left + S(16), r.top, xt - S(32), r.bottom - r.top, src,
+    text_at(cd->nmcd.hdc, r.left + scaled(16), r.top, xt - scaled(32), r.bottom - r.top, src,
             CLR_TEXT, g_font, DT_LEFT | DT_PATH_ELLIPSIS);
-    text_at(cd->nmcd.hdc, r.left + xt, r.top, xs - xt - S(16), r.bottom - r.top, type,
+    text_at(cd->nmcd.hdc, r.left + xt, r.top, xs - xt - scaled(16), r.bottom - r.top, type,
             CLR_MUTED, g_font_meta, DT_LEFT);
-    text_at(cd->nmcd.hdc, r.left + xs, r.top, S(180), r.bottom - r.top, state,
+    text_at(cd->nmcd.hdc, r.left + xs, r.top, scaled(180), r.bottom - r.top, state,
             CLR_MUTED, g_font_meta, DT_LEFT | DT_END_ELLIPSIS);
     return CDRF_SKIPDEFAULT;
 }

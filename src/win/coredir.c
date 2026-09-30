@@ -6,6 +6,7 @@
 #include <sddl.h>
 #include <stdlib.h>
 #include <strsafe.h>
+#include "winmsg.h"
 
 /* SYSTEM and Administrators full control, Users read and execute. */
 static const wchar_t CORE_SDDL[] =
@@ -15,12 +16,6 @@ static const wchar_t CORE_SDDL[] =
 #define WRITING_RIGHTS (FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA |   \
                         FILE_WRITE_ATTRIBUTES | FILE_DELETE_CHILD | DELETE |   \
                         WRITE_DAC | WRITE_OWNER | GENERIC_WRITE | GENERIC_ALL)
-
-static int say(wchar_t *msg, size_t cap, const wchar_t *text)
-{
-    if (msg && cap) StringCchCopyW(msg, cap, text);
-    return 0;
-}
 
 /* Cores that could not be moved into core\ this session (one was running
    from the old folder): they stay where they are until the next start. */

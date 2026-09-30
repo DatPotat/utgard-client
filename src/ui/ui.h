@@ -13,7 +13,9 @@
 #include <string.h>
 #include "zapret.h"
 #include "link.h"
+#include "dnsname.h"
 #include "profiles.h"
+#include "profstore.h"
 #include "ask.h"
 #include "net.h"
 #include "genconf.h"
@@ -46,7 +48,6 @@ typedef struct {
     COLORREF warn, warn_lo, warn_hi, line, border, hover;
 } ui_palette;
 extern ui_palette g_pal;
-extern int        g_dark;
 
 #define CLR_BG        (g_pal.bg)
 #define CLR_SIDE      (g_pal.side)
@@ -194,9 +195,9 @@ extern int        g_dark;
 extern int g_ox;
 int tabs_top(void);
 #define TABS_H   tabs_top()
-#define FOOTER_H S(56)
-#define PAD      S(24)
-#define SIDE_W(rail) ((rail) ? S(112) : S(232))
+#define FOOTER_H scaled(56)
+#define PAD      scaled(24)
+#define SIDE_W(rail) ((rail) ? scaled(112) : scaled(232))
 #define RAIL_BELOW   920    /* DIP: narrower windows get the icon rail */
 #define WIN_W_DEF    1040
 #define WIN_H_DEF    640
@@ -219,7 +220,7 @@ enum { HOSTS_VPN = 0, HOSTS_ZAPRET };
 /* A copy of the server names, taken on the UI thread, for workers that need
    to resolve them without touching g_prof. */
 typedef struct {
-    char host[PROFILES_MAX][256];
+    char host[PROFILES_MAX][DNS_NAME_SIZE];
     int  count;
 } host_snapshot;
 /* ---- background jobs ---------------------------------------------------
@@ -281,73 +282,24 @@ typedef struct {
     wchar_t err[256];
 } upd_job;
 
-/* ---- shared state (defined in main.c) ---- */
+/* ---- main.c: the window frame ---- */
 
-extern int g_dpi;
 extern int g_page;
-extern HFONT g_font, g_font_big, g_font_small;
-extern HFONT g_font_bold, g_font_small_bold, g_font_title, g_font_deco, g_font_meta;
-void  fonts_load_embedded(void);
-HFONT title_font(void);
-extern HWND g_nav[NAV_COUNT], g_row_server, g_tab_sites, g_tab_apps, g_tab_pac, g_set_theme;
-extern HBRUSH g_brush_bg, g_brush_footer, g_brush_surface, g_brush_line;
-extern HWND g_toggle, g_pick_path, g_list;
-extern HWND g_zap_start, g_zap_stop, g_zap_restart;
-extern HWND g_plist, g_prof_add, g_prof_del, g_prof_sub;
-extern int g_sub_busy;
-extern int g_ping[PROFILES_MAX];
-extern int g_ping_gen;
-extern int g_ping_busy;
-extern int g_vpn_on;
-extern int g_installing;        /* 1 sing-box, 2 AmneziaWG being downloaded */
-extern int g_awg_lost;          /* VPN on, AmneziaWG profile, tunnel gone */
-extern int g_awg_ready;         /* the AmneziaWG core is downloaded and intact */
-extern HWND g_btn_hosts, g_btn_apps, g_btn_pac, g_zap_fix;
-extern HWND g_pac_list, g_pac_back, g_pac_file, g_pac_url, g_pac_toggle;
-extern HWND g_pac_refresh, g_pac_delete, g_pac_help;
-extern HWND g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts, g_tip;
-extern HWND g_alist, g_app_back, g_app_pick, g_app_manual;
-extern WNDPROC g_alist_prev;
-extern app_entry g_appv[APPS_MAX];
-extern int g_appv_n;
-extern int g_app_hover_item;
-extern int g_app_hover_zone;
-extern HWND g_hedit, g_h_back, g_h_tidy, g_h_save;
-extern int g_hosts_mode;
-extern HWND g_pk_search, g_pk_list, g_pk_back, g_pk_save;
-extern pick_proc g_pk_all[PICK_MAX];
-extern int g_pk_view[PICK_MAX];
-extern int g_pk_view_n;
-extern int g_pk_checked_n;
-extern HWND g_ed_name[ED_ROWS], g_ed_nplus[ED_ROWS], g_ed_nminus[ED_ROWS];
-extern HWND g_ed_pbrowse[ED_ROWS];
-extern HWND g_ed_path[ED_ROWS], g_ed_pplus[ED_ROWS], g_ed_pminus[ED_ROWS];
-extern HWND g_ed_back, g_ed_save;
-extern int g_ed_ncount, g_ed_pcount;
-extern wchar_t g_ed_orig[APPS_NAME_MAX];
-extern app_settings g_set;
-extern HWND g_set_open, g_set_mtu, g_set_log, g_set_back, g_set_save;
-extern HWND g_set_upd, g_set_upd_now;
-extern HWND g_set_v_utgard, g_set_v_singbox, g_set_v_awg;
-extern HWND g_set_stack, g_set_dns, g_set_tray, g_set_auto, g_set_sub, g_ping_now, g_zap_list;
-extern long long g_sub_retry;
-extern int g_exc_known, g_exc_present;
-extern int g_zap_dirty;
-extern int g_busy;
-extern const wchar_t *g_busy_text;
-extern int g_host_count, g_app_count, g_pac_count;
-extern pac_status_record g_pac_status;
-extern int g_pac_status_valid;
-extern profile_store g_prof;
-extern HFONT g_font_mono;
-extern zapret_info g_zap;
-extern zapret_status g_status;
-extern int g_count;
-extern int g_upd_pending;
+extern HWND g_nav[NAV_COUNT];
+extern HWND g_tip;
 
 /* ---- ui_draw.c ---- */
 
-int S(int v);
+void  fonts_load_embedded(void);
+HFONT title_font(void);
+extern int g_dpi;
+extern HFONT g_font, g_font_big, g_font_small;
+extern HFONT g_font_bold, g_font_small_bold, g_font_meta;
+extern HBRUSH g_brush_bg, g_brush_footer, g_brush_surface, g_brush_line;
+extern HFONT g_font_mono;
+
+/* Design pixels (at 96 DPI) to device pixels at the window's DPI. */
+int scaled(int v);
 void fonts_create(void);
 void fonts_destroy(void);
 void brushes_create(void);
@@ -370,7 +322,7 @@ void scroll_sync(HWND target);
 
 /* ---- ui_popup.c ---- */
 enum { SEL_DNS = 0, SEL_SUB, SEL_THEME, SEL_LOG, SEL_STACK, SEL_COUNT };
-extern HWND g_sel[SEL_COUNT];
+
 int  popup_choose(HWND owner, const RECT *anchor, const wchar_t *const *items, int n,
                   int current, int align_right);
 void select_open(HWND owner, HWND field, HWND combo);
@@ -412,8 +364,7 @@ void theme_ask(void);
 
 /* ---- ui_hostlist.c ---- */
 
-extern HWND g_hl_search, g_hl_list, g_hl_add, g_hl_mode, g_hl_del, g_hl_clear, g_hl_undo;
-extern HWND g_hl_paste, g_hl_add_ok, g_hl_add_cancel, g_hl_move, g_hl_sclear, g_zap_sclear, g_hl_tback;
+extern HWND g_hl_list, g_zap_sclear;
 void search_frame(HDC dc, HWND edit);
 void field_frame(HDC dc, HWND edit, int extra_right);
 void search_clear_place(HWND edit, HWND clear, int x, int y, int w, void (*place)(HWND, int, int, int, int));
@@ -461,6 +412,9 @@ void draw_pick_row(const DRAWITEMSTRUCT *d);
 
 /* ---- ui_common.c ---- */
 
+extern int g_busy;
+extern const wchar_t *g_busy_text;
+
 void to_wide(const char *src, wchar_t *dst, int cap);
 const wchar_t *plural_ru(long n, const wchar_t *one, const wchar_t *few, const wchar_t *many);
 int status_refresh(void);
@@ -471,21 +425,35 @@ long_job *job_new(job_work work, job_done done);
 /* From the worker: what the job is doing now, for the status line. text
    must be a string literal - it outlives the job. */
 void job_stage(long_job *j, const wchar_t *text);
-extern int g_switch_note;         /* last switch failed, old profile runs */
 void job_free(long_job *j);
 int job_start(HWND hwnd, const wchar_t *label, long_job *j);
 void after_action(HWND hwnd);
 
 /* ---- ui_zapret.c ---- */
 
+extern HWND g_pick_path, g_list;
+
+void zapret_create_list(HWND hwnd);
+
+extern int g_exc_known, g_exc_present;
+extern int g_zap_dirty;
+extern zapret_info g_zap;
+extern zapret_status g_status;
+extern int g_count;
+
+void zapret_create(HWND hwnd);
+extern HWND g_zap_start, g_zap_stop, g_zap_restart;
+extern HWND g_zap_fix;
+extern HWND g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts;
+extern HWND g_zap_list;
+extern HWND g_zap_search, g_zap_again, g_zg[4], g_zi[3];
+
 void strategies_reload(void);
 void strategies_filter(void);
 int  strategies_shown(void);
 void act_zap_game_to(HWND hwnd, int mode);
 void act_zap_ipset_to(HWND hwnd, int mode);
-extern HWND g_set_adv;
-extern int  g_set_adv_open;
-extern HWND g_zap_search, g_zap_again, g_zg[4], g_zi[3];
+
 const wchar_t *selected_strategy(void);
 void act_stop(HWND hwnd);
 void act_start(HWND hwnd, const wchar_t *name);
@@ -498,27 +466,95 @@ void act_zap_ipset_update(HWND hwnd);
 void act_zap_hosts(HWND hwnd);
 void on_pick_path(HWND hwnd);
 
-/* ---- ui_vpn.c ---- */
+/* ---- ui_profiles.c ---- */
+
+extern HWND g_plist, g_prof_add, g_prof_del, g_prof_sub;
+extern HWND g_ping_now;
+
+void servers_create(HWND hwnd);
+
+extern int g_ping[PROFILES_MAX];
+extern int g_ping_gen;
+extern int g_ping_busy;
+extern profile_store g_prof;
 
 void profiles_reload(void);
 int profile_selected(void);
+int profile_duplicate(const link_profile *l);
 void ping_start(HWND hwnd);
-int  subscription_apply(HWND hwnd, const wchar_t *url, const char *body, size_t len, int silent);
-void act_subscription(HWND hwnd);
-void sub_auto_check(HWND hwnd);
-int  offer_install(HWND hwnd);
-void offer_awg_install(HWND hwnd, int resume);
-int vpn_refresh(void);
-void act_vpn(HWND hwnd);
-void vpn_restart(HWND hwnd, int target);
-void vpn_reap_orphan(HWND hwnd);
-extern int g_switch_pending;     /* profile a switch waits to run, -1 none */
 void act_profile_add(HWND hwnd);
 void act_profile_delete(HWND hwnd);
 void act_profile_activate(HWND hwnd);
 void act_profile_pick(HWND hwnd);
 
+/* ---- ui_sub.c ---- */
+
+extern int g_sub_busy;
+extern long long g_sub_retry;
+
+int  subscription_apply(HWND hwnd, const wchar_t *url, const char *body, size_t len, int silent);
+void act_subscription(HWND hwnd);
+void sub_auto_check(HWND hwnd);
+
+/* ---- ui_install.c ---- */
+
+extern int g_installing;        /* 1 sing-box, 2 AmneziaWG being downloaded */
+extern int g_awg_after_singbox;
+
+int  offer_install(HWND hwnd);
+void offer_awg_install(HWND hwnd, int resume);
+void offer_awg_download(HWND hwnd);
+/* The first-run questions in one window. */
+int  startup_notice_waiting(void);
+void startup_notice_begin(HWND hwnd);
+void startup_notice_timer(HWND hwnd);
+void startup_notice_shown(HWND hwnd);
+void startup_notice(HWND hwnd);
+
+/* ---- ui_vpn.c ---- */
+
+extern HWND g_row_server;
+extern HWND g_toggle;
+extern HWND g_btn_hosts, g_btn_apps, g_btn_pac;
+extern int g_switch_note;         /* last switch failed, old profile runs */
+extern int g_switch_pending;     /* profile a switch waits to run, -1 none */
+
+void connect_create(HWND hwnd);
+
+extern int g_vpn_on;
+extern int g_awg_lost;          /* VPN on, AmneziaWG profile, tunnel gone */
+extern int g_awg_ready;         /* the AmneziaWG core is downloaded and intact */
+
+int vpn_refresh(void);
+void act_vpn(HWND hwnd);
+void vpn_restart(HWND hwnd, int target);
+void vpn_reap_orphan(HWND hwnd);
+
 /* ---- ui_lists.c ---- */
+
+extern HWND g_tab_sites, g_tab_apps, g_tab_pac;
+
+extern app_entry g_appv[APPS_MAX];
+extern int g_appv_n;
+extern int g_app_hover_item;
+extern int g_app_hover_zone;
+extern int g_hosts_mode;
+extern pick_proc g_pk_all[PICK_MAX];
+extern int g_pk_view[PICK_MAX];
+extern int g_pk_view_n;
+extern int g_pk_checked_n;
+extern int g_ed_ncount, g_ed_pcount;
+extern wchar_t g_ed_orig[APPS_NAME_MAX];
+extern int g_host_count, g_app_count;
+
+void lists_create(HWND hwnd);
+extern HWND g_alist, g_app_back, g_app_pick, g_app_manual;
+extern HWND g_hedit, g_h_back, g_h_tidy, g_h_save;
+extern HWND g_pk_search, g_pk_list, g_pk_back, g_pk_save;
+extern HWND g_ed_name[ED_ROWS], g_ed_nplus[ED_ROWS], g_ed_nminus[ED_ROWS];
+extern HWND g_ed_pbrowse[ED_ROWS];
+extern HWND g_ed_path[ED_ROWS], g_ed_pplus[ED_ROWS], g_ed_pminus[ED_ROWS];
+extern HWND g_ed_back, g_ed_save;
 
 int ed_path_top(void);
 int root_file(const wchar_t *tail, wchar_t *out, size_t cap);
@@ -546,19 +582,19 @@ void ed_add(HWND hwnd, HWND *rows, int *count);
 void ed_save(HWND hwnd);
 
 /* ---- ui_pac.c ---- */
+
+extern int g_pac_count;
+extern pac_status_record g_pac_status;
+extern int g_pac_status_valid;
+
+void pac_create(HWND hwnd);
+extern HWND g_pac_list, g_pac_back, g_pac_file, g_pac_url, g_pac_toggle;
+extern HWND g_pac_refresh, g_pac_delete, g_pac_help;
 enum { PAC_UI_REFRESH = 2, PAC_UI_TOGGLE, PAC_UI_DELETE };
 int pac_selected(void);
 void pac_reload(void);
 void pac_open_page(HWND hwnd);
 void pac_auto_check(HWND hwnd);
-/* ui_vpn.c: the first-run questions in one window */
-extern int g_awg_after_singbox;
-int  startup_notice_waiting(void);
-void startup_notice_begin(HWND hwnd);
-void startup_notice_timer(HWND hwnd);
-void startup_notice_shown(HWND hwnd);
-void startup_notice(HWND hwnd);
-void offer_awg_download(HWND hwnd);
 LRESULT CALLBACK pac_list_proc(HWND list, UINT msg, WPARAM wp, LPARAM lp,
                                UINT_PTR id, DWORD_PTR ref);
 void pac_back(HWND hwnd);
@@ -567,6 +603,20 @@ void pac_add_url(HWND hwnd);
 void pac_action(HWND hwnd, int op);
 
 /* ---- ui_settings.c ---- */
+
+extern int g_set_adv_open;
+
+extern app_settings g_set;
+extern int g_upd_pending;
+
+void settings_create(HWND hwnd);
+extern HWND g_set_theme;
+extern HWND g_set_mtu, g_set_log, g_set_back, g_set_save;
+extern HWND g_set_upd, g_set_upd_now;
+extern HWND g_set_v_utgard, g_set_v_singbox, g_set_v_awg;
+extern HWND g_set_stack, g_set_dns, g_set_tray, g_set_auto, g_set_sub;
+extern HWND g_sel[SEL_COUNT];
+extern HWND g_set_adv;
 
 void set_open(HWND hwnd);
 void set_save(HWND hwnd);

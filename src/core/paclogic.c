@@ -13,7 +13,7 @@ int paclogic_any(size_t count, int (*evaluate)(size_t, void *), void *context, i
 }
 
 paclogic_result paclogic_route(int received_domain, const char *original,
-                               const char (*names)[256], int name_count,
+                               const char (*names)[DNS_NAME_SIZE], int name_count,
                                paclogic_evaluator evaluate, void *context)
 {
     paclogic_result result = { 0, 0, 0 }; int i;
