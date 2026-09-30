@@ -178,19 +178,19 @@ static int host_port(const unsigned char *p, int n, char *host, unsigned short *
         }
         memcpy(host, p + 2, p[1]);
         host[p[1]] = 0;
-    } else if (!inet_ntop(p[0] == 1 ? AF_INET : AF_INET6, p + 1, host, 256)) return 0;
+    } else if (!inet_ntop(p[0] == 1 ? AF_INET : AF_INET6, p + 1, host, DNS_NAME_SIZE)) return 0;
     *port = (unsigned short)((p[k - 2] << 8) | p[k - 1]);
     return *port != 0;
 }
 
 static int evaluate_host(const char *host, unsigned short port, int domain)
 {
-    wchar_t url[600], wide[256];
+    wchar_t url[600], wide[DNS_NAME_SIZE];
     script_context context;
     int result = 0, failed = 0;
     LONG cache_generation;
     if (!host || !host[0] ||
-        !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, host, -1, wide, 256))
+        !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, host, -1, wide, DNS_NAME_SIZE))
         return 0;
     if (port == 80 || port == 443)
         StringCchPrintfW(url, 600,
@@ -228,9 +228,9 @@ int pacbridge_decide_host(const char *host, unsigned short port)
     return evaluate_host(host, port, 1);
 }
 
-static int decision(const unsigned char *p, int n, char proxy_host[256])
+static int decision(const unsigned char *p, int n, char proxy_host[DNS_NAME_SIZE])
 {
-    char host[256], names[16][256];
+    char host[DNS_NAME_SIZE], names[16][DNS_NAME_SIZE];
     unsigned short port;
     int name_count = 0;
     route_context context;
@@ -238,14 +238,14 @@ static int decision(const unsigned char *p, int n, char proxy_host[256])
     if (proxy_host) proxy_host[0] = 0;
     if (!host_port(p, n, host, &port)) return 0;
     if (p[0] == 3) {
-        StringCchCopyA(names[0], 256, host);
+        StringCchCopyA(names[0], DNS_NAME_SIZE, host);
         name_count = 1;
     } else {
         name_count = pacdns_names(p + 1, p[0] == 4, names, 16);
     }
     context.port = port;
     result = paclogic_route(p[0] == 3, host, names, name_count, route_evaluate, &context);
-    if (result.rewrite && proxy_host) StringCchCopyA(proxy_host, 256, result.rewrite_host);
+    if (result.rewrite && proxy_host) StringCchCopyA(proxy_host, DNS_NAME_SIZE, result.rewrite_host);
     return result.vpn;
 }
 
@@ -262,7 +262,7 @@ static int domain_address(const char *host, unsigned short port, unsigned char o
 
 static SOCKET connect_to(const unsigned char *p, int n, int type)
 {
-    char host[256], service[8];
+    char host[DNS_NAME_SIZE], service[8];
     unsigned short port;
     struct addrinfo hints, *list = NULL, *a;
     SOCKET s = INVALID_SOCKET;
@@ -525,8 +525,8 @@ static void relay_udp(SOCKET control, LONG gen)
                 if (p->data != INVALID_SOCKET) pacstatus_udp_evict();
                 udp_close(p);
                 {
-                    char proxy_host[256];
-                    char ignored[256];
+                    char proxy_host[DNS_NAME_SIZE];
+                    char ignored[DNS_NAME_SIZE];
                     unsigned short target_port;
                     p->proxy = decision(packet + 3, asize, proxy_host);
                     p->route_size = asize;
@@ -594,7 +594,7 @@ static DWORD WINAPI client_thread(void *arg)
     unsigned char header[3], addr[259], bound[259], reply[10] = { 5, 1, 0, 1, 127, 0, 0, 1, 0, 0 };
     int n, which, bs, target_n;
     unsigned char target[259];
-    char proxy_host[256];
+    char proxy_host[DNS_NAME_SIZE];
     free(c);
     timeout_socket(s);
     if (!authenticate(s) || !transfer(s, header, 3, 0) || header[0] != 5 || header[2]) goto done;
@@ -605,7 +605,7 @@ static DWORD WINAPI client_thread(void *arg)
     which = decision(addr, n, proxy_host);
     target_n = n; memcpy(target, addr, n);
     if (which == 1 && proxy_host[0]) {
-        char ignored[256];
+        char ignored[DNS_NAME_SIZE];
         unsigned short target_port;
         if (host_port(addr, n, ignored, &target_port)) {
             int routed = domain_address(proxy_host, target_port, target);

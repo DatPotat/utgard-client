@@ -13,6 +13,7 @@
 #include <strsafe.h>
 
 #include "tunnames.h"
+#include "winmsg.h"
 #define TUNNEL   UTGARD_AWG_TUN_W
 #define SERVICE  L"AmneziaWGTunnel$" TUNNEL          /* fixed by amneziawg.exe */
 #define PIPE     L"\\\\.\\pipe\\" TUNNEL L".conf"     /* the name must end in .conf */
@@ -28,12 +29,6 @@
    ran in this session: the service writes its log there wherever the exe
    lives, and we take away only what we caused. */
 static int g_made_pf_dir;
-
-static int say(wchar_t *msg, size_t cap, const wchar_t *text)
-{
-    if (msg && cap) StringCchCopyW(msg, cap, text);
-    return 0;
-}
 
 const wchar_t *awgsvc_interface(void) { return TUNNEL; }
 

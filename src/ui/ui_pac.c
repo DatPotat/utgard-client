@@ -2,6 +2,15 @@
 #include "pacstore.h"
 #include "pacproc.h"
 
+/* State owned by this file (declared in ui.h). */
+int g_pac_count;
+pac_status_record g_pac_status;
+int g_pac_status_valid;
+
+/* Controls of this page, created by pac_create. */
+HWND g_pac_list, g_pac_back, g_pac_file, g_pac_url, g_pac_toggle;
+HWND g_pac_refresh, g_pac_delete, g_pac_help;
+
 enum { PAC_OP_ADD = 1, PAC_OP_REFRESH, PAC_OP_TOGGLE, PAC_OP_DELETE, PAC_OP_AUTO };
 
 typedef struct {
@@ -315,7 +324,7 @@ static LRESULT paint_header(NMCUSTOMDRAW *d)
         FillRect(d->hdc, &d->rc, g_brush_bg);
         r = d->rc; r.left = r.right - 1;  FillRect(d->hdc, &r, g_brush_line);
         r = d->rc; r.top = r.bottom - 1;  FillRect(d->hdc, &r, g_brush_line);
-        r = d->rc; r.left += S(6); r.right -= S(6);
+        r = d->rc; r.left += scaled(6); r.right -= scaled(6);
         old = SelectObject(d->hdc, g_font);
         SetBkMode(d->hdc, TRANSPARENT);
         SetTextColor(d->hdc, CLR_MUTED);
@@ -351,4 +360,46 @@ LRESULT CALLBACK pac_list_proc(HWND list, UINT msg, WPARAM wp, LPARAM lp,
     }
     if (msg == WM_NCDESTROY) RemoveWindowSubclass(list, pac_list_proc, id);
     return DefSubclassProc(list, msg, wp, lp);
+}
+
+/* The page's controls, in on_create's order: creation order is the
+   z-order and the tab order. */
+void pac_create(HWND hwnd)
+{
+    {
+        LVCOLUMNW column;
+        static const wchar_t *titles[] = { L"Источник", L"Тип", L"Состояние" };
+        static const int widths[] = { 300, 70, 160 };
+        int i;
+        INITCOMMONCONTROLSEX icc = { sizeof icc, ICC_LISTVIEW_CLASSES };
+        InitCommonControlsEx(&icc);
+        g_pac_list = CreateWindowExW(0, WC_LISTVIEWW, NULL,
+            WS_CHILD | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
+            0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_PAC_LIST,
+            (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE), NULL);
+        ListView_SetExtendedListViewStyle(g_pac_list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+        /* Drawn like the servers table: the page paints the headings, each
+           row is drawn whole (pac_row_draw); the columns only hold the text.
+           A one-pixel-wide image list sets the row height. */
+        SetWindowLongPtrW(g_pac_list, GWL_STYLE, GetWindowLongPtrW(g_pac_list, GWL_STYLE) | LVS_NOCOLUMNHEADER);
+        ListView_SetImageList(g_pac_list, ImageList_Create(1, scaled(44), ILC_COLOR32, 1, 0), LVSIL_SMALL);
+        SetWindowTheme(g_pac_list, L"DarkMode_Explorer", NULL);
+        ListView_SetBkColor(g_pac_list, CLR_SURFACE);
+        ListView_SetTextBkColor(g_pac_list, CLR_SURFACE);
+        ListView_SetTextColor(g_pac_list, CLR_TEXT);
+        SetWindowSubclass(g_pac_list, pac_list_proc, 1, 0);
+        ZeroMemory(&column, sizeof column);
+        column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+        for (i = 0; i < 3; i++) {
+            column.iSubItem = i; column.pszText = (LPWSTR)titles[i]; column.cx = scaled(widths[i]);
+            ListView_InsertColumn(g_pac_list, i, &column);
+        }
+    }
+    g_pac_back = make_button_on(hwnd, L"Назад", ID_PAC_BACK, BK_SECONDARY, BACK_FOOTER);
+    g_pac_file = make_button_on(hwnd, L"Добавить файл…", ID_PAC_FILE, BK_SECONDARY, BACK_PAGE);
+    g_pac_url = make_button_on(hwnd, L"Добавить по адресу…", ID_PAC_URL, BK_PRIMARY, BACK_PAGE);
+    g_pac_toggle = make_button(hwnd, L"Включить / выключить", ID_PAC_TOGGLE, BK_SECONDARY);
+    g_pac_refresh = make_button(hwnd, L"Обновить", ID_PAC_REFRESH, BK_SECONDARY);
+    g_pac_delete = make_button(hwnd, L"Удалить", ID_PAC_DELETE, BK_DANGER);
+    g_pac_help = make_button(hwnd, L"Как работает PAC", ID_PAC_HELP, BK_LINK);
 }

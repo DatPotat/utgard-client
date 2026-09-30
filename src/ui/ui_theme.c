@@ -7,7 +7,7 @@
 #include "ui.h"
 
 ui_palette g_pal;
-int        g_dark;
+static int g_dark;
 int        g_ox;
 
 static const ui_palette PAL_LIGHT = {
@@ -125,27 +125,27 @@ int nav_rail(HWND hwnd)
 {
     RECT c;
     GetClientRect(hwnd, &c);
-    return c.right < S(RAIL_BELOW);
+    return c.right < scaled(RAIL_BELOW);
 }
 
 void nav_layout(HWND hwnd)
 {
     HWND items[NAV_COUNT] = { g_nav[0], g_nav[1], g_nav[2], g_nav[3], g_nav[4] };
     int  rail = nav_rail(hwnd);
-    int  x = S(16), w = SIDE_W(rail) - S(32), h = rail ? S(60) : S(44);
-    int  y = rail ? S(24) : S(64);
+    int  x = scaled(16), w = SIDE_W(rail) - scaled(32), h = rail ? scaled(60) : scaled(44);
+    int  y = rail ? scaled(24) : scaled(64);
     int  i;
     RECT c;
 
     GetClientRect(hwnd, &c);
-    if (rail) { x = S(8); w = SIDE_W(1) - S(16); }
+    if (rail) { x = scaled(8); w = SIDE_W(1) - scaled(16); }
     for (i = 0; i < NAV_SETTINGS; i++) {
         MoveWindow(items[i], x, y, w, h, TRUE);
-        y += h + S(4);
+        y += h + scaled(4);
     }
     /* Settings sit at the foot, above the two status lines. */
     MoveWindow(items[NAV_SETTINGS], x,
-               c.bottom - (rail ? S(24) : S(84)) - h, w, h, TRUE);
+               c.bottom - (rail ? scaled(24) : scaled(84)) - h, w, h, TRUE);
     for (i = 0; i < NAV_COUNT; i++) InvalidateRect(items[i], NULL, FALSE);
 }
 
@@ -172,7 +172,7 @@ void state_icon(HDC dc, int kind, int cx, int cy, int r, int inv)
 static void nav_icon(HDC dc, int which, int cx, int cy, COLORREF c)
 {
     static const int icons[NAV_COUNT] = { ICON_POWER, ICON_SERVER, ICON_ROUTE, ICON_SHIELD, ICON_SETTINGS };
-    gfx_icon(dc, icons[which], cx - S(10), cy - S(10), S(20), c);
+    gfx_icon(dc, icons[which], cx - scaled(10), cy - scaled(10), scaled(20), c);
 }
 
 void draw_nav(const DRAWITEMSTRUCT *d)
@@ -188,19 +188,19 @@ void draw_nav(const DRAWITEMSTRUCT *d)
     FillRect(d->hDC, &r, side);
     DeleteObject(side);
     if (cur || hot || (d->itemState & ODS_SELECTED))
-        rounded_r(d->hDC, &r, cur ? CLR_TINT : CLR_HOVER, cur ? CLR_TINT : CLR_HOVER, S(10));
+        rounded_r(d->hDC, &r, cur ? CLR_TINT : CLR_HOVER, cur ? CLR_TINT : CLR_HOVER, scaled(10));
     GetWindowTextW(d->hwndItem, caption, 32);
     if (rail) {
-        nav_icon(d->hDC, which, (r.left + r.right) / 2, r.top + S(22), CLR_TEXT);
-        text_at(d->hDC, r.left, r.top + S(34), r.right - r.left, S(18), caption,
+        nav_icon(d->hDC, which, (r.left + r.right) / 2, r.top + scaled(22), CLR_TEXT);
+        text_at(d->hDC, r.left, r.top + scaled(34), r.right - r.left, scaled(18), caption,
                 CLR_TEXT, cur ? g_font_small_bold : g_font_small, DT_CENTER);
     } else {
-        nav_icon(d->hDC, which, r.left + S(22), (r.top + r.bottom) / 2, CLR_TEXT);
-        text_at(d->hDC, r.left + S(44), r.top, r.right - r.left - S(44), r.bottom - r.top,
+        nav_icon(d->hDC, which, r.left + scaled(22), (r.top + r.bottom) / 2, CLR_TEXT);
+        text_at(d->hDC, r.left + scaled(44), r.top, r.right - r.left - scaled(44), r.bottom - r.top,
                 caption, CLR_TEXT, cur ? g_font_bold : g_font, DT_LEFT);
     }
     if ((d->itemState & ODS_FOCUS) && !(d->itemState & ODS_NOFOCUSRECT)) {
-        InflateRect(&r, -S(3), -S(3));
+        InflateRect(&r, -scaled(3), -scaled(3));
         DrawFocusRect(d->hDC, &r);
     }
 }
@@ -222,23 +222,23 @@ void paint_sidebar(HDC dc, const RECT *client)
 
     FillRect(dc, &r, side);
     DeleteObject(side);
-    fill(dc, sw - S(1), 0, S(1), client->bottom, g_brush_line);
+    fill(dc, sw - scaled(1), 0, scaled(1), client->bottom, g_brush_line);
     if (rail) return;
 
     if (g_set.theme == SETTINGS_THEME_KHOKHLOMA) {
         /* A strip of "травка": berries and leaves under the name. */
         int x;
-        text_at(dc, S(28), S(20), sw - S(40), S(28), L"Утгардъ", CLR_TEXT, title_font(), DT_LEFT);
-        for (x = S(24); x + S(28) < sw; x += S(36)) {
+        text_at(dc, scaled(28), scaled(20), sw - scaled(40), scaled(28), L"Утгардъ", CLR_TEXT, title_font(), DT_LEFT);
+        for (x = scaled(24); x + scaled(28) < sw; x += scaled(36)) {
             HBRUSH  leaf = CreateSolidBrush(RGB(0xD4, 0xA5, 0x2A));
             HBRUSH  green = CreateSolidBrush(RGB(0x3F, 0x6B, 0x2A));
             HGDIOBJ op = SelectObject(dc, GetStockObject(NULL_PEN)), ob = SelectObject(dc, leaf);
-            Ellipse(dc, x, S(52), x + S(14), S(58));
+            Ellipse(dc, x, scaled(52), x + scaled(14), scaled(58));
             SelectObject(dc, green);
-            Ellipse(dc, x + S(18), S(56), x + S(30), S(61));
+            Ellipse(dc, x + scaled(18), scaled(56), x + scaled(30), scaled(61));
             SelectObject(dc, ob); SelectObject(dc, op);
             DeleteObject(leaf); DeleteObject(green);
-            dot(dc, x + S(15), S(55), S(3), RGB(0xC6, 0x28, 0x28));
+            dot(dc, x + scaled(15), scaled(55), scaled(3), RGB(0xC6, 0x28, 0x28));
         }
     } else {
         /* The name, and the version beside it in small type, on one line;
@@ -247,21 +247,21 @@ void paint_sidebar(HDC dc, const RECT *client)
         HGDIOBJ old = SelectObject(dc, g_font_bold);
         GetTextExtentPoint32W(dc, L"Utgard", 6, &sz);
         SelectObject(dc, old);
-        text_at(dc, S(28), S(24), sw - S(40), S(24), L"Utgard", CLR_TEXT, g_font_bold, DT_LEFT);
-        text_at(dc, S(28) + sz.cx + S(6), S(24) + S(2), sw - S(40) - sz.cx, S(24),
+        text_at(dc, scaled(28), scaled(24), sw - scaled(40), scaled(24), L"Utgard", CLR_TEXT, g_font_bold, DT_LEFT);
+        text_at(dc, scaled(28) + sz.cx + scaled(6), scaled(24) + scaled(2), sw - scaled(40) - sz.cx, scaled(24),
                 UTGARD_VERSION_W, CLR_MUTED, g_font_meta, DT_LEFT);
     }
-    fill(dc, S(16), client->bottom - S(72), sw - S(32), S(1), g_brush_line);
+    fill(dc, scaled(16), client->bottom - scaled(72), sw - scaled(32), scaled(1), g_brush_line);
     {
         static const wchar_t *vpn_text[4] = {
             L"VPN выключен", L"Подключение…", L"VPN включён", L"Нет соединения" };
         int k = vpn_state(), z = g_status.mode != ZAPRET_OFF;
-        int y1 = client->bottom - S(52), y2 = client->bottom - S(26);
-        state_icon(dc, k, S(37), y1, S(8), 0);
-        text_at(dc, S(54), y1 - S(10), sw - S(66), S(20), vpn_text[k],
+        int y1 = client->bottom - scaled(52), y2 = client->bottom - scaled(26);
+        state_icon(dc, k, scaled(37), y1, scaled(8), 0);
+        text_at(dc, scaled(54), y1 - scaled(10), sw - scaled(66), scaled(20), vpn_text[k],
                 CLR_TEXT, g_font_small_bold, DT_LEFT | DT_END_ELLIPSIS);
-        state_icon(dc, z ? STATE_ON : STATE_OFF, S(37), y2, S(8), 0);
-        text_at(dc, S(54), y2 - S(10), sw - S(66), S(20),
+        state_icon(dc, z ? STATE_ON : STATE_OFF, scaled(37), y2, scaled(8), 0);
+        text_at(dc, scaled(54), y2 - scaled(10), sw - scaled(66), scaled(20),
                 !g_zap.valid ? L"zapret не настроен"
                 : z ? L"zapret работает" : L"zapret выключен",
                 CLR_TEXT, g_font_small_bold, DT_LEFT | DT_END_ELLIPSIS);
@@ -276,7 +276,7 @@ void theme_ask(void)
     c[4] = CLR_MUTED; c[5] = CLR_OK; c[6] = CLR_WARN; c[7] = CLR_ACCENT;
     ask_configure_colors(c);
     ask_configure_frame(g_dark, CLR_SIDE, CLR_BORDER, rounded_r);
-    ask_configure(draw_button, S, g_font, g_font_small,
+    ask_configure(draw_button, scaled, g_font, g_font_small,
                   g_brush_bg, g_brush_surface, g_brush_line,
                   CLR_TEXT, CLR_MUTED, CLR_SURFACE);
 }

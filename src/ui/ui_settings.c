@@ -4,6 +4,22 @@
 
 #include "ui.h"
 
+/* State owned by this file (declared in ui.h). */
+int g_set_adv_open;
+
+/* State owned by this file (declared in ui.h). */
+app_settings g_set;
+int g_upd_pending;     /* found while hidden in the tray: ask on show */
+
+/* Controls of this page, created by settings_create. */
+HWND g_set_adv;
+HWND g_sel[SEL_COUNT];
+HWND g_set_theme;
+HWND g_set_mtu, g_set_log, g_set_back, g_set_save;
+HWND g_set_upd, g_set_upd_now;
+HWND g_set_v_utgard, g_set_v_singbox, g_set_v_awg;
+HWND g_set_stack, g_set_dns, g_set_tray, g_set_auto, g_set_sub;
+
 void set_open(HWND hwnd)
 {
     wchar_t buf[16];
@@ -178,4 +194,98 @@ void upd_done(HWND hwnd, upd_job *j)
                     L"Utgard", MB_ICONINFORMATION | MB_OK);
     }
     free(j);
+}
+
+/* The page's controls, in on_create's order: creation order is the
+   z-order and the tab order. */
+void settings_create(HWND hwnd)
+{
+    HINSTANCE inst = (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE);
+    int i;
+
+    g_set_mtu = CreateWindowExW(0, L"EDIT", L"",
+        WS_CHILD | WS_TABSTOP | ES_NUMBER | ES_CENTER, 0, 0, 0, 0, hwnd,
+        (HMENU)(INT_PTR)ID_SET_MTU, inst, NULL);
+    SendMessageW(g_set_mtu, EM_SETLIMITTEXT, 4, 0);
+
+    /* A drop-down list, not an editable combo: only real levels go in.
+       DarkMode_CFD is the theme that darkens combo boxes. */
+    g_set_log = CreateWindowExW(0, L"COMBOBOX", NULL,
+        WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0,
+        hwnd, (HMENU)(INT_PTR)ID_SET_LOG, inst, NULL);
+    SetWindowTheme(g_set_log, L"DarkMode_CFD", NULL);
+    {
+        static const wchar_t *labels[] = {
+            L"trace — всё подряд",
+            L"debug — подробно, для разбора проблем",
+            L"info — обычная работа",
+            L"warn — предупреждения и ошибки",
+            L"error — только ошибки",
+            L"fatal — только критические ошибки",
+            L"panic — почти ничего"
+        };
+        for (i = 0; i < 7; i++)
+            SendMessageW(g_set_log, CB_ADDSTRING, 0, (LPARAM)labels[i]);
+    }
+    g_set_stack = CreateWindowExW(0, L"COMBOBOX", NULL,
+        WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0,
+        hwnd, (HMENU)(INT_PTR)ID_SET_STACK, inst, NULL);
+    SetWindowTheme(g_set_stack, L"DarkMode_CFD", NULL);
+    SendMessageW(g_set_stack, CB_ADDSTRING, 0, (LPARAM)L"system — стек Windows");
+    SendMessageW(g_set_stack, CB_ADDSTRING, 0, (LPARAM)L"gvisor — стек sing-box");
+    SendMessageW(g_set_stack, CB_ADDSTRING, 0, (LPARAM)L"mixed — TCP system, UDP gvisor");
+
+    g_set_dns = CreateWindowExW(0, L"COMBOBOX", NULL,
+        WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0,
+        hwnd, (HMENU)(INT_PTR)ID_SET_DNS, inst, NULL);
+    SetWindowTheme(g_set_dns, L"DarkMode_CFD", NULL);
+    for (i = 0; i < settings_dns_count; i++) {
+        SendMessageW(g_set_dns, CB_ADDSTRING, 0, (LPARAM)settings_dns[i].label);
+    }
+
+    g_set_sub = CreateWindowExW(0, L"COMBOBOX", NULL,
+        WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0,
+        hwnd, (HMENU)(INT_PTR)ID_SET_SUB, inst, NULL);
+    SetWindowTheme(g_set_sub, L"DarkMode_CFD", NULL);
+    for (i = 0; i < settings_sub_count; i++) {
+        wchar_t line[64];
+        int     h = settings_sub_hours[i];
+        /* Russian plural: 3 часа, 6 и 12 часов. */
+        StringCchPrintfW(line, 64, L"обновлять каждые %d %s", h,
+                         (h % 10 >= 2 && h % 10 <= 4 && (h % 100 < 12 || h % 100 > 14))
+                             ? L"часа" : L"часов");
+        SendMessageW(g_set_sub, CB_ADDSTRING, 0, (LPARAM)line);
+    }
+
+    g_set_theme = CreateWindowExW(0, L"COMBOBOX", NULL,
+        WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0,
+        hwnd, (HMENU)(INT_PTR)ID_SET_THEME, inst, NULL);
+
+    g_set_tray = make_button_on(hwnd, L"Сворачивать в трей при закрытии",
+                             ID_SET_TRAY, BK_CHECK, BACK_CARD);
+    g_set_auto = make_button_on(hwnd, L"Запускать вместе с Windows",
+                             ID_SET_AUTO, BK_CHECK, BACK_CARD);
+    g_set_upd  = make_button_on(hwnd, L"Сообщать о новых версиях",
+                             ID_SET_UPD, BK_CHECK, BACK_CARD);
+    g_set_upd_now = make_button(hwnd, L"Проверить обновления", ID_SET_UPD_NOW,
+                                BK_SECONDARY);
+    /* The versions in use, each a link to its own release page. */
+    g_set_v_utgard  = make_button_on(hwnd, L"Utgard " UTGARD_VERSION_W, ID_SET_V_UTGARD, BK_LINK, BACK_CARD);
+    g_set_v_singbox = make_button_on(hwnd, L"", ID_SET_V_SINGBOX, BK_LINK, BACK_CARD);
+    g_set_v_awg     = make_button_on(hwnd, L"", ID_SET_V_AWG, BK_LINK, BACK_CARD);
+
+    g_set_adv  = make_button_on(hwnd, L"", ID_SET_ADV, BK_ROW, BACK_CARD);
+    {
+        /* Each drop-down field stands for a hidden combo box. */
+        HWND combos[SEL_COUNT];
+        int  k;
+        combos[SEL_DNS] = g_set_dns; combos[SEL_SUB] = g_set_sub; combos[SEL_THEME] = g_set_theme;
+        combos[SEL_LOG] = g_set_log; combos[SEL_STACK] = g_set_stack;
+        for (k = 0; k < SEL_COUNT; k++) {
+            g_sel[k] = make_button_on(hwnd, L"", ID_SEL_FIRST + k, BK_SELECT, BACK_CARD);
+            SetPropW(g_sel[k], L"utgard.combo", (HANDLE)combos[k]);
+        }
+    }
+    g_set_back = make_button_on(hwnd, L"Назад", ID_SET_BACK, BK_SECONDARY, BACK_FOOTER);
+    g_set_save = make_button_on(hwnd, L"Сохранить", ID_SET_SAVE, BK_PRIMARY, BACK_FOOTER);
 }

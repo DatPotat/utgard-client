@@ -28,12 +28,10 @@ int main(void)
     CHECK(link_parse_wgconf(conf, strlen(conf), &s.items[1].link, err, sizeof err));
     strcpy(s.items[1].link.name, "awg");
     s.active = 1;
-    /* The base is the program's own default config, written as a file the
-       way the program seeds config.json. */
-    f = fopen("out/config.default.json", "wb");
-    CHECK(f != NULL);
-    if (f) { fwrite(utgard_default_config, 1, utgard_default_config_len, f); fclose(f); }
-    in.base_path = "out/config.default.json"; in.store = &s; in.rule_set_path = "list/general.srs";
+    /* The base is the program's own default config, the text the program
+       seeds config.json with. */
+    in.base.name = "config.json"; in.base.text = utgard_default_config;
+    in.store = &s; in.rule_set_path = "list/general.srs";
     /* tunnel not up: refused */
     CHECK(!genconf_build(&in, &text, err, sizeof err) && text == NULL);
     in.awg_interface = "utgard-awg-tun"; in.awg_server_ip = "203.0.113.10"; in.awg_exe = "amneziawg\\amneziawg.exe";   /* placeholder */
@@ -84,7 +82,8 @@ int main(void)
            original final. */
         static profile_store one;
         genconf_input pin;
-        const char *overlays[1] = { "out/work-overlay.json" };
+        const genconf_file overlays[1] = { { "work-overlay.json",
+            "{\"route\":{\"rules\":[{\"domain_suffix\":[\"corp.example\"],\"action\":\"route\",\"outbound\":\"direct\"}]}}" } };
         JSON_Array *rules, *dns_rules;
         size_t count, k, overlay_at = 0;
         memset(&one, 0, sizeof one);
@@ -92,14 +91,8 @@ int main(void)
         one.items[0].link.proto = LINK_SS; strcpy(one.items[0].link.server, "203.0.113.10");
         one.items[0].link.port = 8388; strcpy(one.items[0].link.method, "aes-256-gcm");
         strcpy(one.items[0].link.password, "p"); strcpy(one.items[0].link.name, "one");
-        f = fopen("out/work-overlay.json", "wb");
-        CHECK(f != NULL);
-        if (f) {
-            fputs("{\"route\":{\"rules\":[{\"domain_suffix\":[\"corp.example\"],\"action\":\"route\",\"outbound\":\"direct\"}]}}", f);
-            fclose(f);
-        }
         memset(&pin, 0, sizeof pin);
-        pin.base_path = "out/config.default.json"; pin.store = &one; pin.rule_set_path = "list/general.srs";
+        pin.base = in.base; pin.store = &one; pin.rule_set_path = "list/general.srs";
         pin.overlays = overlays; pin.overlay_count = 1;
 
         CHECK(genconf_build(&pin, &text, err, sizeof err));                 /* without PAC */

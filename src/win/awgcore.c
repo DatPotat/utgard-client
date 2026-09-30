@@ -4,12 +4,7 @@
 
 #include <windows.h>
 #include <strsafe.h>
-
-static int say(wchar_t *msg, size_t cap, const wchar_t *text)
-{
-    if (msg && cap) StringCchCopyW(msg, cap, text);
-    return 0;
-}
+#include "winmsg.h"
 
 int awgcore_present(void)
 {

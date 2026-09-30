@@ -4,6 +4,23 @@
 
 #include "ui.h"
 
+/* State owned by this file (declared in ui.h). */
+HWND g_pick_path, g_list;
+
+/* State owned by this file (declared in ui.h). */
+int g_exc_known, g_exc_present;
+int g_zap_dirty;   /* Game Filter changed: it lives in winws arguments; lists are reread live */
+zapret_info g_zap;
+zapret_status g_status;
+int g_count;
+
+/* Controls of this page, created by zapret_create. */
+HWND g_zap_search, g_zap_again, g_zg[4], g_zi[3];
+HWND g_zap_start, g_zap_stop, g_zap_restart;
+HWND g_zap_fix;
+HWND g_zap_game, g_zap_ipset, g_zap_ipupd, g_zap_hosts;
+HWND g_zap_list;
+
 static wchar_t g_names[ZAPRET_MAX_STRATEGIES][ZAPRET_NAME_MAX];
 
 /* Reload the strategy list from the current folder. */
@@ -126,7 +143,7 @@ static void snapshot_hosts(host_snapshot *snap)
     int i;
     snap->count = 0;
     for (i = 0; i < g_prof.count && i < PROFILES_MAX; i++)
-        StringCchCopyA(snap->host[snap->count++], 256, g_prof.items[i].link.server);
+        StringCchCopyA(snap->host[snap->count++], DNS_NAME_SIZE, g_prof.items[i].link.server);
 }
 
 static int collect_server_ips(const host_snapshot *snap, char ips[][16], int max)
@@ -428,4 +445,50 @@ void on_pick_path(HWND hwnd)
     status_refresh();
     exc_check_start(hwnd);
     layout(hwnd);
+}
+
+/* The page's controls, in on_create's order: creation order is the
+   z-order and the tab order. */
+void zapret_create(HWND hwnd)
+{
+    g_zap_start   = make_button(hwnd, L"Запустить выбранную", ID_ZAP_START, BK_PRIMARY);
+    g_zap_stop    = make_button_on(hwnd, L"Выключить", ID_ZAP_STOP, BK_SECONDARY, BACK_ACCENT);
+    g_zap_restart = make_button_on(hwnd, L"Перезапустить", ID_ZAP_RESTART, BK_SECONDARY, BACK_ACCENT);
+    g_zap_fix = make_button_on(hwnd, L"Исправить", ID_ZAP_FIX, BK_PRIMARY, BACK_CARD);
+    g_zap_game  = make_button(hwnd, L"Game filter", ID_ZAP_GAME, BK_SECONDARY);
+    g_zap_ipset = make_button(hwnd, L"IPSet filter", ID_ZAP_IPSET, BK_SECONDARY);
+    g_zap_ipupd = make_button_on(hwnd, L"Обновить", ID_ZAP_IPUPD, BK_SECONDARY, BACK_CARD);
+    g_zap_hosts = make_button_on(hwnd, L"Проверить", ID_ZAP_HOSTS, BK_SECONDARY, BACK_CARD);
+    g_zap_list  = make_button_on(hwnd, L"Сайты для zapret", ID_ZAP_LIST, BK_ROW, BACK_CARD);
+    {
+        static const wchar_t *game[4] = { L"Выкл.", L"TCP и UDP", L"TCP", L"UDP" };
+        static const wchar_t *ipset[3] = { L"Выкл.", L"По списку", L"Любой адрес" };
+        int k;
+        for (k = 0; k < 4; k++) g_zg[k] = make_button_on(hwnd, game[k], ID_ZG_FIRST + k, BK_CHIP, BACK_CARD);
+        for (k = 0; k < 3; k++) g_zi[k] = make_button_on(hwnd, ipset[k], ID_ZI_FIRST + k, BK_CHIP, BACK_CARD);
+    }
+    g_zap_again = make_button_on(hwnd, L"Перезапустить", ID_ZAP_AGAIN, BK_SECONDARY, BACK_TINT);
+    g_zap_search = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL,
+                                   0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_ZAP_SEARCH,
+                                   (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE), NULL);
+    ask_edit_center(g_zap_search);
+}
+
+/* The folder button and the strategy list. Created apart from
+   zapret_create, before the site-list controls, as on_create always did:
+   creation order is the z-order and the tab order. */
+void zapret_create_list(HWND hwnd)
+{
+    g_pick_path  = make_button(hwnd, L"Указать папку…", ID_PICK_PATH, BK_SECONDARY);
+    g_list = CreateWindowExW(0, L"LISTBOX", NULL,
+                             WS_CHILD | WS_VSCROLL | WS_TABSTOP |
+                             LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY,
+                             0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_STRATEGIES,
+                             (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE),
+                             NULL);
+    SendMessageW(g_list, LB_SETITEMHEIGHT, 0, (LPARAM)scaled(30));
+    /* Dark scrollbar: undocumented since Windows 10 1809, and a no-op
+       where the theme is absent. */
+    SetWindowTheme(g_list, L"DarkMode_Explorer", NULL);
+    list_hover_attach(g_list);
 }

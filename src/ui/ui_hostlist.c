@@ -10,8 +10,9 @@
 #include "ui.h"
 #include "hostlist.h"
 
-HWND g_hl_search, g_hl_list, g_hl_add, g_hl_mode, g_hl_del, g_hl_clear, g_hl_undo;
-HWND g_hl_paste, g_hl_add_ok, g_hl_add_cancel, g_hl_move, g_hl_sclear, g_zap_sclear, g_hl_tback;
+HWND g_hl_list, g_zap_sclear;          /* shared: see ui.h */
+static HWND g_hl_search, g_hl_add, g_hl_mode, g_hl_del, g_hl_clear, g_hl_undo;
+static HWND g_hl_paste, g_hl_add_ok, g_hl_add_cancel, g_hl_move, g_hl_sclear, g_hl_tback;
 
 static hl_entry      g_all[LIST_MAX];
 static int           g_all_n;
@@ -105,7 +106,7 @@ void hl_create(HWND hwnd)
                                 WS_CHILD | WS_VSCROLL | WS_TABSTOP | LBS_NODATA |
                                 LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
                                 0, 0, 0, 0, hwnd, (HMENU)(INT_PTR)ID_HL_LIST, inst, NULL);
-    SendMessageW(g_hl_list, LB_SETITEMHEIGHT, 0, (LPARAM)S(40));
+    SendMessageW(g_hl_list, LB_SETITEMHEIGHT, 0, (LPARAM)scaled(40));
     list_hover_attach(g_hl_list);
     SetWindowSubclass(g_hl_list, hl_list_proc, 7, 0);
     g_hl_paste = CreateWindowExW(0, L"EDIT", L"",
@@ -130,7 +131,7 @@ void hl_fonts(void)
 {
     SendMessageW(g_hl_search, WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_hl_paste,  WM_SETFONT, (WPARAM)g_font_mono, TRUE);
-    SendMessageW(g_hl_list,   LB_SETITEMHEIGHT, 0, (LPARAM)S(40));
+    SendMessageW(g_hl_list,   LB_SETITEMHEIGHT, 0, (LPARAM)scaled(40));
     SendMessageW(g_hl_search, EM_SETCUEBANNER, TRUE, (LPARAM)L"Найти в списке");
 }
 
@@ -140,17 +141,17 @@ typedef struct { int title, bar, count, add, sel, list, end; } hl_geo;
 
 static void geometry(const RECT *c, hl_geo *g)
 {
-    int y = TABS_H + S(16);
+    int y = TABS_H + scaled(16);
     g->title = y;
-    if (zapret()) y += S(48);
-    g->bar = y;          y += S(48);
-    g->count = y;        y += S(28);
-    g->add = y;          if (g_adding && !g_text_mode) y += S(120) + S(12) + S(40) + S(16);
+    if (zapret()) y += scaled(48);
+    g->bar = y;          y += scaled(48);
+    g->count = y;        y += scaled(28);
+    g->add = y;          if (g_adding && !g_text_mode) y += scaled(120) + scaled(12) + scaled(40) + scaled(16);
     g->list = y;
     /* The selection and undo bar sits under the list, not above it: rows
        must not jump under the pointer when the first tick appears. */
-    g->sel = c->bottom - S(24) - S(48);
-    g->end = (!g_text_mode && (g_chk_n || g_undo_text)) ? g->sel - S(8) : c->bottom - S(24);
+    g->sel = c->bottom - scaled(24) - scaled(48);
+    g->end = (!g_text_mode && (g_chk_n || g_undo_text)) ? g->sel - scaled(8) : c->bottom - scaled(24);
 }
 
 static int btn_w(HWND b)
@@ -163,7 +164,7 @@ static int btn_w(HWND b)
     GetTextExtentPoint32W(dc, t, n, &sz);
     SelectObject(dc, old);
     ReleaseDC(b, dc);
-    return sz.cx + S(32);
+    return sz.cx + scaled(32);
 }
 
 void hl_layout(const RECT *c, void (*place)(HWND, int, int, int, int))
@@ -177,30 +178,30 @@ void hl_layout(const RECT *c, void (*place)(HWND, int, int, int, int))
 
     /* Toolbar: search on the left, the buttons from the right edge. */
     x = right;
-    w = btn_w(g_h_save);  x -= w; place(g_h_save, x, g.bar, w, S(40)); x -= S(12);
+    w = btn_w(g_h_save);  x -= w; place(g_h_save, x, g.bar, w, scaled(40)); x -= scaled(12);
     if (g_text_mode) {
-        w = btn_w(g_h_tidy); x -= w; place(g_h_tidy, x, g.bar, w, S(40)); x -= S(12);
-        place(g_hl_tback, PAD, g.bar, btn_w(g_hl_tback), S(40));
+        w = btn_w(g_h_tidy); x -= w; place(g_h_tidy, x, g.bar, w, scaled(40)); x -= scaled(12);
+        place(g_hl_tback, PAD, g.bar, btn_w(g_hl_tback), scaled(40));
     } else {
-        w = btn_w(g_hl_mode); x -= w; place(g_hl_mode, x, g.bar, w, S(40)); x -= S(12);
-        w = btn_w(g_hl_add);  x -= w; place(g_hl_add, x, g.bar, w, S(40)); x -= S(12);
+        w = btn_w(g_hl_mode); x -= w; place(g_hl_mode, x, g.bar, w, scaled(40)); x -= scaled(12);
+        w = btn_w(g_hl_add);  x -= w; place(g_hl_add, x, g.bar, w, scaled(40)); x -= scaled(12);
         search_clear_place(g_hl_search, g_hl_sclear, PAD, g.bar, x - PAD, place);
     }
     /* zapret's list is a step inside the zapret page: its own way back. */
-    place(g_h_back, PAD, g.title - S(4), btn_w(g_h_back), S(40));
+    place(g_h_back, PAD, g.title - scaled(4), btn_w(g_h_back), scaled(40));
 
     if (g_adding) {
         wchar_t cap[48];
         StringCchPrintfW(cap, 48, g_pv.added ? L"Добавить %d" : L"Добавить", g_pv.added);
         SetWindowTextW(g_hl_add_ok, cap);
-        place(g_hl_paste, PAD, g.add, (c->right - PAD * 2) * 11 / 20, S(120));
+        place(g_hl_paste, PAD, g.add, (c->right - PAD * 2) * 11 / 20, scaled(120));
         w = btn_w(g_hl_add_ok);
-        place(g_hl_add_ok, PAD, g.add + S(132), w, S(40));
-        place(g_hl_add_cancel, PAD + w + S(12), g.add + S(132), btn_w(g_hl_add_cancel), S(40));
+        place(g_hl_add_ok, PAD, g.add + scaled(132), w, scaled(40));
+        place(g_hl_add_cancel, PAD + w + scaled(12), g.add + scaled(132), btn_w(g_hl_add_cancel), scaled(40));
         EnableWindow(g_hl_add_ok, g_pv.added > 0);
     }
     {
-        int bx = right - S(12);
+        int bx = right - scaled(12);
         HWND bar[3];
         int  k, n = 0;
         SetWindowTextW(g_hl_move, zapret() ? L"Перенести в VPN" : L"Перенести в zapret");
@@ -208,17 +209,17 @@ void hl_layout(const RECT *c, void (*place)(HWND, int, int, int, int))
         else if (g_undo_text) bar[n++] = g_hl_undo;
         for (k = n - 1; k >= 0; k--) {
             w = btn_w(bar[k]); bx -= w;
-            place(bar[k], bx, g.sel + S(8), w, S(32));
-            bx -= S(8);
+            place(bar[k], bx, g.sel + scaled(8), w, scaled(32));
+            bx -= scaled(8);
         }
     }
 
-    place(g_hl_list, PAD + S(28) + S(1), g.list + S(1), c->right - PAD * 2 - S(28) - S(2),
-          g.end - g.list - S(2) - S(5));
+    place(g_hl_list, PAD + scaled(28) + scaled(1), g.list + scaled(1), c->right - PAD * 2 - scaled(28) - scaled(2),
+          g.end - g.list - scaled(2) - scaled(5));
     /* Below the line that explains the format, not over it. */
-    place(g_hedit, PAD + S(1), g.count + S(28), c->right - PAD * 2 - S(2),
-          c->bottom - S(24) - g.count - S(28) - S(2) - S(5));
-    g_strip.left = PAD; g_strip.right = PAD + S(18);
+    place(g_hedit, PAD + scaled(1), g.count + scaled(28), c->right - PAD * 2 - scaled(2),
+          c->bottom - scaled(24) - g.count - scaled(28) - scaled(2) - scaled(5));
+    g_strip.left = PAD; g_strip.right = PAD + scaled(18);
     g_strip.top = g.list; g_strip.bottom = g.end;
 
     ShowWindow(g_hl_search, list_mode ? SW_SHOW : SW_HIDE);
@@ -249,9 +250,9 @@ void hl_paint(HDC dc, const RECT *c)
 
     geometry(c, &g);
     if (zapret()) {
-        int bw = g_text_mode ? 0 : btn_w(g_h_back) + S(16);
-        text_at(dc, PAD + bw, g.title, w - bw, S(32), L"Сайты для zapret", CLR_TEXT, title_font(), DT_LEFT);
-        text_at(dc, PAD, g.title, w, S(32),
+        int bw = g_text_mode ? 0 : btn_w(g_h_back) + scaled(16);
+        text_at(dc, PAD + bw, g.title, w - bw, scaled(32), L"Сайты для zapret", CLR_TEXT, title_font(), DT_LEFT);
+        text_at(dc, PAD, g.title, w, scaled(32),
                 g_busy && g_busy_text ? g_busy_text : L"", CLR_MUTED, g_font_small, DT_RIGHT);
     }
 
@@ -259,10 +260,10 @@ void hl_paint(HDC dc, const RECT *c)
         StringCchCopyW(line, 256, zapret()
             ? L"По одному в строке. «^» в начале — только сам домен, одно слово — вся зона. Строки с # — комментарии."
             : L"По одному в строке, поддомены подхватываются сами. Подсети — 198.51.100.0/24. Строки с # — комментарии.");
-        text_at(dc, PAD + S(4), g.count, w, S(20), line, CLR_MUTED, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
+        text_at(dc, PAD + scaled(4), g.count, w, scaled(20), line, CLR_MUTED, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
         {
-            RECT r = { PAD, g.count + S(28) - S(1), c->right - PAD, c->bottom - S(24) };
-            rounded_r(dc, &r, CLR_SURFACE, CLR_LINE, S(12));
+            RECT r = { PAD, g.count + scaled(28) - scaled(1), c->right - PAD, c->bottom - scaled(24) };
+            rounded_r(dc, &r, CLR_SURFACE, CLR_LINE, scaled(12));
         }
         return;
     }
@@ -278,21 +279,21 @@ void hl_paint(HDC dc, const RECT *c)
                          g_all_n, plural_ru(g_all_n, L"сайт", L"сайта", L"сайтов"));
     if (SendMessageW(g_hedit, EM_GETMODIFY, 0, 0))
         StringCchCatW(line, 256, L" · есть несохранённые изменения");
-    text_at(dc, PAD + S(4), g.count, w, S(20), line, CLR_MUTED, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
+    text_at(dc, PAD + scaled(4), g.count, w, scaled(20), line, CLR_MUTED, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
 
     if (g_adding) {
-        int  px = PAD + (c->right - PAD * 2) * 11 / 20 + S(24), pw = c->right - PAD - px, y = g.add;
-        RECT r = { PAD - S(1), g.add - S(1), PAD + (c->right - PAD * 2) * 11 / 20 + S(1), g.add + S(121) };
-        rounded_r(dc, &r, CLR_SURFACE, CLR_BORDER, S(8));
-        text_at(dc, px, y, pw, S(20), L"Вставьте адреса: по одному в строке, ссылки и целые списки тоже подойдут.",
+        int  px = PAD + (c->right - PAD * 2) * 11 / 20 + scaled(24), pw = c->right - PAD - px, y = g.add;
+        RECT r = { PAD - scaled(1), g.add - scaled(1), PAD + (c->right - PAD * 2) * 11 / 20 + scaled(1), g.add + scaled(121) };
+        rounded_r(dc, &r, CLR_SURFACE, CLR_BORDER, scaled(8));
+        text_at(dc, px, y, pw, scaled(20), L"Вставьте адреса: по одному в строке, ссылки и целые списки тоже подойдут.",
                 CLR_MUTED, g_font_small, DT_LEFT | DT_END_ELLIPSIS);
-        y += S(28);
+        y += scaled(28);
         StringCchPrintfW(line, 256, L"Будет добавлено: %d", g_pv.added);
-        text_at(dc, px, y, pw, S(20), line, CLR_TEXT, g_font_bold, DT_LEFT); y += S(22);
+        text_at(dc, px, y, pw, scaled(20), line, CLR_TEXT, g_font_bold, DT_LEFT); y += scaled(22);
         StringCchPrintfW(line, 256, L"Уже в списке: %d", g_pv.duplicate);
-        text_at(dc, px, y, pw, S(20), line, CLR_MUTED, g_font_small, DT_LEFT); y += S(20);
+        text_at(dc, px, y, pw, scaled(20), line, CLR_MUTED, g_font_small, DT_LEFT); y += scaled(20);
         StringCchPrintfW(line, 256, L"Уже покрыты доменом из списка: %d", g_pv.covered);
-        text_at(dc, px, y, pw, S(20), line, CLR_MUTED, g_font_small, DT_LEFT); y += S(20);
+        text_at(dc, px, y, pw, scaled(20), line, CLR_MUTED, g_font_small, DT_LEFT); y += scaled(20);
         if (g_pv.invalid) {
             wchar_t ex[64];
             MultiByteToWideChar(CP_UTF8, 0, g_pv.bad[0], -1, ex, 64);
@@ -300,24 +301,24 @@ void hl_paint(HDC dc, const RECT *c)
         } else {
             StringCchCopyW(line, 256, L"Не похожи на адрес: 0");
         }
-        text_at(dc, px, y, pw, S(20), line, g_pv.invalid ? CLR_WARN : CLR_MUTED,
+        text_at(dc, px, y, pw, scaled(20), line, g_pv.invalid ? CLR_WARN : CLR_MUTED,
                 g_font_small, DT_LEFT | DT_END_ELLIPSIS);
     }
 
     if (g_chk_n || g_undo_text) {
-        RECT r = { PAD, g.sel, c->right - PAD, g.sel + S(48) };
-        rounded_r(dc, &r, CLR_TINT, CLR_TINT, S(12));
+        RECT r = { PAD, g.sel, c->right - PAD, g.sel + scaled(48) };
+        rounded_r(dc, &r, CLR_TINT, CLR_TINT, scaled(12));
         if (g_chk_n)
             StringCchPrintfW(line, 256, L"Выбрано: %d", g_chk_n);
         else
             StringCchPrintfW(line, 256, L"Удалено: %d %s", g_undo_n,
                              plural_ru(g_undo_n, L"запись", L"записи", L"записей"));
-        text_at(dc, PAD + S(16), g.sel, w, S(48), line, CLR_TEXT, g_font_bold, DT_LEFT);
+        text_at(dc, PAD + scaled(16), g.sel, w, scaled(48), line, CLR_TEXT, g_font_bold, DT_LEFT);
     }
 
     {
-        RECT r = { PAD + S(28), g.list, c->right - PAD, g.end };
-        rounded_r(dc, &r, CLR_SURFACE, CLR_LINE, S(12));
+        RECT r = { PAD + scaled(28), g.list, c->right - PAD, g.end };
+        rounded_r(dc, &r, CLR_SURFACE, CLR_LINE, scaled(12));
     }
     /* The letter strip: letters that begin some entry in the view are
        dark, the rest faint; a click jumps to the first of the letter. */
@@ -330,8 +331,8 @@ void hl_paint(HDC dc, const RECT *c)
             else if (f >= L'A' && f <= L'Z') have[f - L'A' + 1] = 1;
         }
         step = (g_strip.bottom - g_strip.top) / n;
-        if (step > S(20)) step = S(20);
-        if (step < S(13)) return;       /* too short to read: search does the job */
+        if (step > scaled(20)) step = scaled(20);
+        if (step < scaled(13)) return;       /* too short to read: search does the job */
         for (k = 0; k < n; k++) {
             wchar_t s[2] = { L_[k], 0 };
             text_at(dc, g_strip.left, g_strip.top + k * step, g_strip.right - g_strip.left, step,
@@ -348,7 +349,7 @@ void draw_host_row(const DRAWITEMSTRUCT *d)
     int      vi = (int)d->itemID, hot, ei;
     HBRUSH   br;
     wchar_t  host[LIST_ENTRY_MAX];
-    int      box = S(18), bx, by;
+    int      box = scaled(18), bx, by;
     RECT     b;
 
     if (vi < 0 || vi >= g_view_n) return;
@@ -357,34 +358,34 @@ void draw_host_row(const DRAWITEMSTRUCT *d)
     br  = CreateSolidBrush(g_chk[ei] ? CLR_TINT : hot ? CLR_HOVER : CLR_SURFACE);
     FillRect(d->hDC, &r, br);
     DeleteObject(br);
-    if (vi) fill(d->hDC, r.left + S(40), r.top, r.right - r.left - S(40), S(1), g_brush_line);
+    if (vi) fill(d->hDC, r.left + scaled(40), r.top, r.right - r.left - scaled(40), scaled(1), g_brush_line);
 
     if (vi == 0 || first_letter(&g_all[g_view[vi - 1]]) != first_letter(&g_all[ei])) {
         wchar_t s[2] = { first_letter(&g_all[ei]), 0 };
-        text_at(d->hDC, r.left, r.top, S(40), r.bottom - r.top, s, CLR_MUTED,
+        text_at(d->hDC, r.left, r.top, scaled(40), r.bottom - r.top, s, CLR_MUTED,
                 g_font_bold, DT_CENTER);
     }
 
-    bx = r.left + S(40); by = r.top + (r.bottom - r.top - box) / 2;
+    bx = r.left + scaled(40); by = r.top + (r.bottom - r.top - box) / 2;
     b.left = bx; b.top = by; b.right = bx + box; b.bottom = by + box;
     rounded_r(d->hDC, &b, g_chk[ei] ? CLR_ACCENT : CLR_SURFACE,
-              g_chk[ei] ? CLR_ACCENT : CLR_BORDER, S(5));
-    if (g_chk[ei]) gfx_icon(d->hDC, ICON_CHECK, bx + S(2), by + S(2), box - S(4), CLR_ON_ACCENT);
+              g_chk[ei] ? CLR_ACCENT : CLR_BORDER, scaled(5));
+    if (g_chk[ei]) gfx_icon(d->hDC, ICON_CHECK, bx + scaled(2), by + scaled(2), box - scaled(4), CLR_ON_ACCENT);
 
     MultiByteToWideChar(CP_UTF8, 0, g_all[ei].host, -1, host, LIST_ENTRY_MAX);
-    text_at(d->hDC, bx + box + S(14), r.top, r.right - bx - box - S(14) - S(180),
+    text_at(d->hDC, bx + box + scaled(14), r.top, r.right - bx - box - scaled(14) - scaled(180),
             r.bottom - r.top, host, CLR_TEXT, g_font, DT_LEFT | DT_END_ELLIPSIS);
     if (g_all[ei].flags) {
         const wchar_t *chip = (g_all[ei].flags & HL_EXACT) ? L"только домен" : L"вся зона";
         RECT c;
-        c.right = r.right - S(48); c.left = c.right - S(110);
-        c.top = r.top + S(9); c.bottom = r.bottom - S(9);
-        rounded_r(d->hDC, &c, CLR_TINT, CLR_TINT, S(22));
+        c.right = r.right - scaled(48); c.left = c.right - scaled(110);
+        c.top = r.top + scaled(9); c.bottom = r.bottom - scaled(9);
+        rounded_r(d->hDC, &c, CLR_TINT, CLR_TINT, scaled(22));
         text_at(d->hDC, c.left, c.top, c.right - c.left, c.bottom - c.top, chip,
                 CLR_TEXT, g_font_small_bold, DT_CENTER);
     }
     /* The bin, the row's own delete. */
-    gfx_icon(d->hDC, ICON_TRASH, r.right - S(24) - S(9), (r.top + r.bottom) / 2 - S(9), S(18),
+    gfx_icon(d->hDC, ICON_TRASH, r.right - scaled(24) - scaled(9), (r.top + r.bottom) / 2 - scaled(9), scaled(18),
              hot ? CLR_TEXT : CLR_MUTED);
 }
 
@@ -595,7 +596,7 @@ LRESULT CALLBACK hl_list_proc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, D
         SetFocus(h);
         if (vi >= 0 && vi < g_view_n) {
             int ei = g_view[vi];
-            if (GET_X_LPARAM(l) >= rc.right - S(48)) {
+            if (GET_X_LPARAM(l) >= rc.right - scaled(48)) {
                 delete_lines(GetParent(h), &g_all[ei].line, 1);
             } else {
                 g_chk[ei] = !g_chk[ei];
@@ -619,8 +620,8 @@ void hl_click(int x, int y)
     x -= g_ox;
     if (x < g_strip.left || x >= g_strip.right || y < g_strip.top) return;
     step = (g_strip.bottom - g_strip.top) / 27;
-    if (step > S(20)) step = S(20);
-    if (step < S(13)) return;
+    if (step > scaled(20)) step = scaled(20);
+    if (step < scaled(13)) return;
     k = (y - g_strip.top) / step;
     if (k < 0 || k >= 27) return;
     for (i = 0; i < g_view_n; i++)
@@ -636,8 +637,8 @@ int hl_over_strip(int x, int y)
     if (g_page != PAGE_HOSTS || g_text_mode) return 0;
     x -= g_ox;
     step = (g_strip.bottom - g_strip.top) / 27;
-    if (step > S(20)) step = S(20);
-    return step >= S(13) && x >= g_strip.left && x < g_strip.right &&
+    if (step > scaled(20)) step = scaled(20);
+    return step >= scaled(13) && x >= g_strip.left && x < g_strip.right &&
            y >= g_strip.top && y < g_strip.top + 27 * step;
 }
 
@@ -665,15 +666,15 @@ void search_clear_place(HWND edit, HWND clear, int x, int y, int w,
 {
     int has = GetWindowTextLengthW(edit) > 0;
     /* The edit sits inside the field's frame, clear of its rounded corners. */
-    place(edit, x + S(10), y + S(4), (has ? w - S(40) : w) - S(20), S(32));
-    place(clear, x + w - S(36), y + S(6), S(28), S(28));
+    place(edit, x + scaled(10), y + scaled(4), (has ? w - scaled(40) : w) - scaled(20), scaled(32));
+    place(clear, x + w - scaled(36), y + scaled(6), scaled(28), scaled(28));
 }
 
 /* The frame of a search field, drawn by the page around the edit and its
    clear button so the two read as one field. */
 void search_frame(HDC dc, HWND edit)
 {
-    field_frame(dc, edit, GetWindowTextLengthW(edit) > 0 ? S(40) : 0);
+    field_frame(dc, edit, GetWindowTextLengthW(edit) > 0 ? scaled(40) : 0);
 }
 
 /* The frame of any input field; extra_right takes in a button that sits
@@ -685,7 +686,7 @@ void field_frame(HDC dc, HWND edit, int extra_right)
     GetWindowRect(edit, &r);
     MapWindowPoints(NULL, GetParent(edit), (POINT *)&r, 2);
     OffsetRect(&r, -g_ox, 0);             /* the page paints in its own coordinates */
-    InflateRect(&r, S(10), S(4));         /* the edit is inset by this much */
+    InflateRect(&r, scaled(10), scaled(4));         /* the edit is inset by this much */
     r.right += extra_right;
-    rounded_r(dc, &r, CLR_SURFACE, CLR_BORDER, S(10));
+    rounded_r(dc, &r, CLR_SURFACE, CLR_BORDER, scaled(10));
 }

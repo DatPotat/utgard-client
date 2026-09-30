@@ -4,8 +4,16 @@
 
 #include "ui.h"
 
+/* State owned by this file (declared in ui.h). */
+int g_dpi = USER_DEFAULT_SCREEN_DPI;
+HFONT g_font, g_font_big, g_font_small;
+HFONT g_font_bold, g_font_small_bold, g_font_meta;
+static HFONT g_font_title, g_font_deco;
+HBRUSH g_brush_bg, g_brush_footer, g_brush_surface, g_brush_line;
+HFONT g_font_mono;
+
 /* logical pixels -> device pixels */
-int S(int v) { return MulDiv(v, g_dpi, USER_DEFAULT_SCREEN_DPI); }
+int scaled(int v) { return MulDiv(v, g_dpi, USER_DEFAULT_SCREEN_DPI); }
 
 /* ---- resources ------------------------------------------------------ */
 
@@ -204,7 +212,7 @@ void text_at(HDC dc, int x, int y, int w, int h,
 
 void rounded(HDC dc, const RECT *r, COLORREF fillc, COLORREF border)
 {
-    rounded_r(dc, r, fillc, border, S(10));
+    rounded_r(dc, r, fillc, border, scaled(10));
 }
 
 /* A row of a card: the label on the left, "\t" then a value on the right,
@@ -226,10 +234,10 @@ static void draw_row(const DRAWITEMSTRUCT *d, COLORREF backdrop, BOOL hot, BOOL 
         HBRUSH page = CreateSolidBrush(CLR_BG);
         FillRect(d->hDC, &r, page);
         DeleteObject(page);
-        InflateRect(&o, S(1), S(1));
-        if (!(round & 1)) o.top -= S(24);
-        if (!(round & 2)) o.bottom += S(24);
-        rounded_r(d->hDC, &o, fillc, CLR_LINE, S(12));
+        InflateRect(&o, scaled(1), scaled(1));
+        if (!(round & 1)) o.top -= scaled(24);
+        if (!(round & 2)) o.bottom += scaled(24);
+        rounded_r(d->hDC, &o, fillc, CLR_LINE, scaled(12));
     } else {
         HBRUSH br = CreateSolidBrush(fillc);
         FillRect(d->hDC, &r, br);
@@ -238,15 +246,15 @@ static void draw_row(const DRAWITEMSTRUCT *d, COLORREF backdrop, BOOL hot, BOOL 
     GetWindowTextW(d->hwndItem, cap, 256);
     tab = wcschr(cap, L'\t');
     if (tab) *tab++ = 0;
-    text_at(d->hDC, r.left + S(16), r.top, r.right - r.left - S(48), r.bottom - r.top,
+    text_at(d->hDC, r.left + scaled(16), r.top, r.right - r.left - scaled(48), r.bottom - r.top,
             cap, (d->itemState & ODS_DISABLED) ? CLR_MUTED : CLR_TEXT,
             d->hwndItem == g_row_server ? g_font_bold : g_font, DT_LEFT | DT_END_ELLIPSIS);
     if (tab)
-        text_at(d->hDC, r.left + S(16), r.top, r.right - r.left - S(48), r.bottom - r.top,
+        text_at(d->hDC, r.left + scaled(16), r.top, r.right - r.left - scaled(48), r.bottom - r.top,
                 tab, CLR_MUTED, g_font, DT_RIGHT);
-    cx = r.right - S(24); cy = (r.top + r.bottom) / 2;
+    cx = r.right - scaled(24); cy = (r.top + r.bottom) / 2;
     gfx_icon(d->hDC, (d->hwndItem == g_set_adv && g_set_adv_open) ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT,
-             cx - S(10), cy - S(10), S(20), CLR_MUTED);
+             cx - scaled(10), cy - scaled(10), scaled(20), CLR_MUTED);
 }
 
 void draw_button(const DRAWITEMSTRUCT *d)
@@ -280,13 +288,13 @@ void draw_button(const DRAWITEMSTRUCT *d)
         FillRect(d->hDC, &r, back);
         DeleteObject(back);
         if (combo) GetWindowTextW(combo, text, 128);
-        rounded_r(d->hDC, &r, (hot || pressed) ? CLR_HOVER : CLR_SURFACE, CLR_BORDER, S(8));
-        text_at(d->hDC, r.left + S(12), r.top, r.right - r.left - S(48), r.bottom - r.top, text,
+        rounded_r(d->hDC, &r, (hot || pressed) ? CLR_HOVER : CLR_SURFACE, CLR_BORDER, scaled(8));
+        text_at(d->hDC, r.left + scaled(12), r.top, r.right - r.left - scaled(48), r.bottom - r.top, text,
                 CLR_TEXT, g_font, DT_LEFT | DT_END_ELLIPSIS);
-        gfx_icon(d->hDC, ICON_CHEVRON_DOWN, r.right - S(30), (r.top + r.bottom) / 2 - S(9), S(18), CLR_MUTED);
+        gfx_icon(d->hDC, ICON_CHEVRON_DOWN, r.right - scaled(30), (r.top + r.bottom) / 2 - scaled(9), scaled(18), CLR_MUTED);
         if ((d->itemState & ODS_FOCUS) && !(d->itemState & ODS_NOFOCUSRECT)) {
             RECT f = r;
-            InflateRect(&f, -S(3), -S(3));
+            InflateRect(&f, -scaled(3), -scaled(3));
             DrawFocusRect(d->hDC, &f);
         }
         return;
@@ -298,7 +306,7 @@ void draw_button(const DRAWITEMSTRUCT *d)
         int    s = (r.bottom - r.top) * 5 / 8;
         FillRect(d->hDC, &r, back);
         DeleteObject(back);
-        if (hot || pressed) rounded_r(d->hDC, &r, pressed ? CLR_TINT : CLR_HOVER, pressed ? CLR_TINT : CLR_HOVER, S(6));
+        if (hot || pressed) rounded_r(d->hDC, &r, pressed ? CLR_TINT : CLR_HOVER, pressed ? CLR_TINT : CLR_HOVER, scaled(6));
         gfx_icon(d->hDC, ICON_FOLDER_OPEN, (r.left + r.right - s) / 2, (r.top + r.bottom - s) / 2, s,
                  hot ? CLR_TEXT : CLR_MUTED);
         return;
@@ -315,7 +323,7 @@ void draw_button(const DRAWITEMSTRUCT *d)
         FillRect(d->hDC, &r, back);
         DeleteObject(back);
         rounded_r(d->hDC, &r, on ? CLR_TINT : (hot || pressed) ? CLR_HOVER : CLR_SURFACE,
-                  on ? CLR_ACCENT : CLR_BORDER, S(8));
+                  on ? CLR_ACCENT : CLR_BORDER, scaled(8));
         text_at(d->hDC, r.left, r.top, r.right - r.left, r.bottom - r.top, caption,
                 disabled ? CLR_MUTED : CLR_TEXT, on ? g_font_bold : g_font_small, DT_CENTER);
         return;
@@ -334,7 +342,7 @@ void draw_button(const DRAWITEMSTRUCT *d)
     if (kind == BK_CHECK) {
         /* A checkbox drawn in the palette: the themed one ignores our colours. */
         int  on  = GetPropW(d->hwndItem, L"utgard.checked") != NULL;
-        int  box = S(18);
+        int  box = scaled(18);
         RECT b;
 
         {
@@ -345,9 +353,9 @@ void draw_button(const DRAWITEMSTRUCT *d)
         b.left = r.left; b.top = r.top + (r.bottom - r.top - box) / 2;
         b.right = b.left + box; b.bottom = b.top + box;
         rounded_r(d->hDC, &b, on ? CLR_ACCENT : (hot ? CLR_HOVER : CLR_SURFACE),
-                  on ? CLR_ACCENT : CLR_BORDER, S(5));
-        if (on) gfx_icon(d->hDC, ICON_CHECK, b.left + S(2), b.top + S(2), box - S(4), CLR_ON_ACCENT);
-        text_at(d->hDC, r.left + box + S(10), r.top, r.right - r.left - box - S(10),
+                  on ? CLR_ACCENT : CLR_BORDER, scaled(5));
+        if (on) gfx_icon(d->hDC, ICON_CHECK, b.left + scaled(2), b.top + scaled(2), box - scaled(4), CLR_ON_ACCENT);
+        text_at(d->hDC, r.left + box + scaled(10), r.top, r.right - r.left - box - scaled(10),
                 r.bottom - r.top, caption, CLR_TEXT, g_font, DT_LEFT);
         return;
     }
@@ -359,11 +367,11 @@ void draw_button(const DRAWITEMSTRUCT *d)
                                                    g_page == PAGE_EDIT)) ||
                       (d->CtlID == ID_TAB_PAC   && g_page == PAGE_PAC);
         FillRect(d->hDC, &r, g_brush_bg);
-        text_at(d->hDC, r.left, r.top, r.right - r.left, r.bottom - r.top - S(3),
+        text_at(d->hDC, r.left, r.top, r.right - r.left, r.bottom - r.top - scaled(3),
                 caption, active || hot ? CLR_TEXT : CLR_MUTED, g_font_bold, DT_CENTER);
         if (active) {
             HBRUSH br = CreateSolidBrush(CLR_ACCENT);
-            fill(d->hDC, r.left, r.bottom - S(3), r.right - r.left, S(3), br);
+            fill(d->hDC, r.left, r.bottom - scaled(3), r.right - r.left, scaled(3), br);
             DeleteObject(br);
         }
     } else if (kind == BK_PRIMARY && d->hwndItem == g_toggle && g_vpn_on) {
@@ -407,7 +415,7 @@ void draw_button(const DRAWITEMSTRUCT *d)
        the frame comes back, so keyboard users still see where they are. */
     if ((d->itemState & ODS_FOCUS) && !(d->itemState & ODS_NOFOCUSRECT)) {
         RECT f = r;
-        InflateRect(&f, -S(3), -S(3));
+        InflateRect(&f, -scaled(3), -scaled(3));
         DrawFocusRect(d->hDC, &f);
     }
 }

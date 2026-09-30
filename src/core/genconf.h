@@ -14,12 +14,27 @@
    list, the anti-loop bypass rules, and the final rule that sends listed
    traffic into the selector. Everything else comes from the base file.
 
-   Nothing here touches Windows: the generator is plain C so it can be run and
-   checked against a real sing-box binary during development. */
+   The generator reads no files: it takes their contents, read by the
+   platform code (src/win/confread.c on Windows). It is plain C, so it can
+   be run and checked against a real sing-box binary during development. */
+
+/* The messages for inputs that cannot be used, shared with the code that
+   reads the files so a file that cannot be read and one that cannot be
+   parsed read the same to the user. BAD_OVERLAY takes the overlay's name. */
+#define GENCONF_MSG_BAD_BASE \
+    "config.json не читается: нужен корректный JSON, без комментариев и висячих запятых"
+#define GENCONF_MSG_BAD_OVERLAY "Не удалось прочитать %s"
+
+/* One input file: its name for messages (the path) and its text,
+   NUL-terminated. Both are required. */
+typedef struct {
+    const char *name;
+    const char *text;
+} genconf_file;
 
 typedef struct {
-    const char  *base_path;      /* config.json beside utgard.exe */
-    const char **overlays;       /* enabled overlay files, in order */
+    genconf_file base;            /* config.json beside utgard.exe */
+    const genconf_file *overlays; /* enabled overlay files, in order */
     int          overlay_count;
     const char  *rule_set_path;  /* e.g. "lists/general.srs", as sing-box sees it */
     int          mtu;            /* tun MTU override; 0 keeps config.json's */

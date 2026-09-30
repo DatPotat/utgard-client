@@ -4,6 +4,10 @@
 
 #include "ui.h"
 
+/* State owned by this file (declared in ui.h). */
+int g_busy;        /* a background job is running */
+const wchar_t *g_busy_text;   /* what it is doing, for the status line */
+
 /* UTF-8 to UTF-16 that always leaves a usable string: on overflow the
    conversion fails and would otherwise leave the buffer untouched. */
 void to_wide(const char *src, wchar_t *dst, int cap)

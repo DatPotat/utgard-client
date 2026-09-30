@@ -2,12 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
-
-static int oops(char *err, size_t cap, const char *msg)
-{
-    if (err && cap) snprintf(err, cap, "%s", msg);
-    return 0;
-}
+#include "errmsg.h"
 
 /* Nothing that could end the line and start another key. */
 static int one_line(const char *s)

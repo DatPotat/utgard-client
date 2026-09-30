@@ -6,52 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
-/* Paths here are UTF-8. On Windows fopen reads them in the active code page,
-   so a folder named in Cyrillic - "D:\Новая папка" - turns into a different
-   name and the file is reported missing. Everything goes through this. */
-static FILE *open_utf8(const char *path, const char *mode)
-{
-#ifdef _WIN32
-    wchar_t wpath[1024], wmode[8];
-
-    if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 1024) == 0) return NULL;
-    if (MultiByteToWideChar(CP_UTF8, 0, mode, -1, wmode, 8) == 0) return NULL;
-    return _wfopen(wpath, wmode);
-#else
-    return fopen(path, mode);
-#endif
-}
-
-/* parson's own file helpers use fopen, so reading and writing is done here. */
-static JSON_Value *parse_utf8_file(const char *path)
-{
-    FILE       *f = open_utf8(path, "rb");
-    char       *buf;
-    long        size;
-    size_t      got;
-    JSON_Value *v;
-
-    if (!f) return NULL;
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
-    size = ftell(f);
-    if (size < 0 || size > 16 * 1024 * 1024) { fclose(f); return NULL; }
-    rewind(f);
-
-    buf = (char *)malloc((size_t)size + 1);
-    if (!buf) { fclose(f); return NULL; }
-    got = fread(buf, 1, (size_t)size, f);
-    fclose(f);
-    buf[got] = '\0';
-
-    v = json_parse_string(buf);
-    free(buf);
-    return v;
-}
+#include "errmsg.h"
 
 void genconf_text_free(char *text)
 {
@@ -65,17 +20,6 @@ void genconf_text_free(char *text)
 
 #define SELECTOR_TAG  "utgard"
 #define RULE_SET_TAG  "general"
-
-static int oops(char *err, size_t cap, const char *msg)
-{
-    if (err && cap) {
-        size_t n = strlen(msg);
-        if (n >= cap) n = cap - 1;
-        memcpy(err, msg, n);
-        err[n] = '\0';
-    }
-    return 0;
-}
 
 /* ---- small helpers -------------------------------------------------- */
 
@@ -588,7 +532,7 @@ static int merge_dns_servers(JSON_Object *dns, JSON_Value **ovl, int n,
 
             if (!tag || !tag[0]) {
                 if (err && errcap)
-                    snprintf(err, errcap, "В %s у DNS-сервера нет тега", in->overlays[i]);
+                    snprintf(err, errcap, "В %s у DNS-сервера нет тега", in->overlays[i].name);
                 return 0;
             }
             for (j = 0; j < have; j++) {
@@ -596,7 +540,7 @@ static int merge_dns_servers(JSON_Object *dns, JSON_Value **ovl, int n,
                 if (t && strcmp(t, tag) == 0) {
                     if (err && errcap)
                         snprintf(err, errcap, "В %s DNS-сервер с тегом «%s» уже объявлен",
-                                 in->overlays[i], tag);
+                                 in->overlays[i].name, tag);
                     return 0;
                 }
             }
@@ -607,7 +551,7 @@ static int merge_dns_servers(JSON_Object *dns, JSON_Value **ovl, int n,
                     if (err && errcap)
                         snprintf(err, errcap, "В %s DNS-сервер «%s» недопустимого типа — "
                                  "в списках приложений разрешены local, tcp, udp, tls, quic, https, h3",
-                                 in->overlays[i], tag);
+                                 in->overlays[i].name, tag);
                     return 0;
                 }
                 json_array_append_value(servers, copy);
@@ -617,98 +561,77 @@ static int merge_dns_servers(JSON_Object *dns, JSON_Value **ovl, int n,
     return 1;
 }
 
-/* ---- the build ------------------------------------------------------ */
-
-int genconf_build(const genconf_input *in, char **out_text, char *err, size_t errcap)
-{
-    JSON_Value  *root = NULL;
-    JSON_Object *ro;
-    JSON_Value  *outbounds, *route_rules, *dns_rules;
-    JSON_Array  *oarr, *rarr, *darr;
-    JSON_Object *route, *dns;
-    JSON_Array  *user_route_rules = NULL, *user_dns_rules = NULL;
-    JSON_Value  *user_route_keep = NULL, *user_dns_keep = NULL;
+/* What the stages of genconf_build share. root and the kept copies are
+   freed once, by genconf_build; a stage that fails frees only its own. */
+typedef struct {
+    const genconf_input *in;
     const profile_store *s;
-    JSON_Value **ovl = NULL;
-    int          novl = 0;
-    int          i, active_ok = 0;
-    char         active_tag[GENCONF_TAG_MAX] = { 0 };
-    int          active_awg = 0;
-    char         pac_dns_vpn_server[80] = { 0 };
-    char         pac_dns_system_server[80] = { 0 };
-    int          pac_dns_tag_too_long = 0;
+    JSON_Value  *root;
+    JSON_Object *ro;
+    JSON_Object *route, *dns;
+    JSON_Value  *user_route_keep, *user_dns_keep;
+    JSON_Array  *user_route_rules, *user_dns_rules;
+    JSON_Value **ovl;
+    int          novl;
+    char         pac_dns_vpn_server[80];
+    char         pac_dns_system_server[80];
+    int          pac_dns_tag_too_long;
+} build_state;
 
-    if (out_text) *out_text = NULL;
-    if (!in || !in->base_path || !out_text || !in->store)
-        return oops(err, errcap, "Генератору не переданы обязательные пути");
-    s = in->store;
-    if (s->count <= 0)
-        return oops(err, errcap, "Нет ни одного сервера");
-    if (s->active < 0 || s->active >= s->count)
-        return oops(err, errcap, "Не выбран активный сервер");
+/* config.json and the overlays, parsed once, up front: both the route rules
+   and the DNS part come from the overlays. */
+static int parse_inputs(build_state *b, char *err, size_t errcap)
+{
+    const genconf_input *in = b->in;
 
-    {
-        FILE *probe = open_utf8(in->base_path, "rb");
-        if (!probe) {
-            if (err && errcap)
-                snprintf(err, errcap, "Не найден файл %s", in->base_path);
-            return 0;
-        }
-        fclose(probe);
-    }
+    b->root = json_parse_string(in->base.text);
+    if (!b->root || json_value_get_type(b->root) != JSONObject)
+        return oops(err, errcap, GENCONF_MSG_BAD_BASE);
+    b->ro = json_value_get_object(b->root);
 
-    root = parse_utf8_file(in->base_path);
-    if (!root || json_value_get_type(root) != JSONObject) {
-        if (root) json_value_free(root);
-        return oops(err, errcap,
-                    "config.json не читается: нужен корректный JSON, "
-                    "без комментариев и висячих запятых");
-    }
-    ro = json_value_get_object(root);
-
-    /* Overlays are read once, up front: both the route rules and the DNS
-       part come from them. */
     if (in->overlay_count > 0) {
-        ovl = (JSON_Value **)calloc((size_t)in->overlay_count, sizeof *ovl);
-        if (!ovl) {
-            json_value_free(root);
-            return oops(err, errcap, "Не хватило памяти для оверлеев");
-        }
+        b->ovl = (JSON_Value **)calloc((size_t)in->overlay_count, sizeof *b->ovl);
+        if (!b->ovl) return oops(err, errcap, "Не хватило памяти для оверлеев");
     }
-    for (novl = 0; novl < in->overlay_count; novl++) {
-        ovl[novl] = parse_utf8_file(in->overlays[novl]);
-        if (!ovl[novl] || json_value_get_type(ovl[novl]) != JSONObject) {
-            free_overlays(ovl, novl + 1);
-            json_value_free(root);
+    for (b->novl = 0; b->novl < in->overlay_count; b->novl++) {
+        JSON_Value *v = in->overlays[b->novl].text ? json_parse_string(in->overlays[b->novl].text) : NULL;
+        b->ovl[b->novl] = v;
+        if (!v || json_value_get_type(v) != JSONObject) {
             if (err && errcap)
-                snprintf(err, errcap, "Не удалось прочитать %s", in->overlays[novl]);
+                snprintf(err, errcap, GENCONF_MSG_BAD_OVERLAY, in->overlays[b->novl].name);
+            b->novl++;                           /* the failed one is freed too */
             return 0;
         }
     }
+    return 1;
+}
 
-    /* Keep the user's own rules aside before the client's frame replaces the
-       arrays they live in. */
-    route = json_object_get_object(ro, "route");
-    if (route) {
-        JSON_Array *a = json_object_get_array(route, "rules");
+/* The user's own rules, kept aside before the client's frame replaces the
+   arrays they live in; for PAC, the DNS servers its two inbounds answer
+   with: dns.final, and the server of the rule for the site list. */
+static int keep_user_rules(build_state *b, char *err, size_t errcap)
+{
+    b->route = json_object_get_object(b->ro, "route");
+    if (b->route) {
+        JSON_Array *a = json_object_get_array(b->route, "rules");
         if (a) {
-            user_route_keep = json_value_deep_copy(json_array_get_wrapping_value(a));
-            user_route_rules = json_value_get_array(user_route_keep);
+            b->user_route_keep = json_value_deep_copy(json_array_get_wrapping_value(a));
+            b->user_route_rules = json_value_get_array(b->user_route_keep);
         }
     }
-    dns = json_object_get_object(ro, "dns");
-    if (dns) {
-        JSON_Array *a = json_object_get_array(dns, "rules");
-        const char *final = json_object_get_string(dns, "final");
-        if (!final) snprintf(pac_dns_system_server, sizeof pac_dns_system_server, "local");
-        else if (strlen(final) < sizeof pac_dns_system_server)
-            snprintf(pac_dns_system_server, sizeof pac_dns_system_server, "%s", final);
-        else pac_dns_tag_too_long = 1;
+    b->dns = json_object_get_object(b->ro, "dns");
+    if (b->dns) {
+        JSON_Array *a = json_object_get_array(b->dns, "rules");
+        const char *final = json_object_get_string(b->dns, "final");
+        if (!final) snprintf(b->pac_dns_system_server, sizeof b->pac_dns_system_server, "local");
+        else if (strlen(final) < sizeof b->pac_dns_system_server)
+            snprintf(b->pac_dns_system_server, sizeof b->pac_dns_system_server, "%s", final);
+        else b->pac_dns_tag_too_long = 1;
         if (a) {
             size_t k, count = json_array_get_count(a);
-            user_dns_keep = json_value_deep_copy(json_array_get_wrapping_value(a));
-            user_dns_rules = json_value_get_array(user_dns_keep);
-            for (k = 0; k < count && !pac_dns_vpn_server[0]; k++) {
+            b->user_dns_keep = json_value_deep_copy(json_array_get_wrapping_value(a));
+            b->user_dns_rules = json_value_get_array(b->user_dns_keep);
+            for (k = 0; k < count && !b->pac_dns_vpn_server[0]; k++) {
                 JSON_Object *rule = json_array_get_object(a, k);
                 JSON_Array *sets = rule ? json_object_get_array(rule, "rule_set") : NULL;
                 const char *server = rule ? json_object_get_string(rule, "server") : NULL;
@@ -716,9 +639,9 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
                 for (j = 0; server && j < nsets; j++) {
                     const char *set = json_array_get_string(sets, j);
                     if (set && strcmp(set, RULE_SET_TAG) == 0) {
-                        if (strlen(server) < sizeof pac_dns_vpn_server)
-                            snprintf(pac_dns_vpn_server, sizeof pac_dns_vpn_server, "%s", server);
-                        else pac_dns_tag_too_long = 1;
+                        if (strlen(server) < sizeof b->pac_dns_vpn_server)
+                            snprintf(b->pac_dns_vpn_server, sizeof b->pac_dns_vpn_server, "%s", server);
+                        else b->pac_dns_tag_too_long = 1;
                         break;
                     }
                 }
@@ -726,29 +649,29 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
         }
     }
 
-    if (in->pac_port && pac_dns_tag_too_long) {
-        json_value_free(user_route_keep);
-        json_value_free(user_dns_keep);
-        json_value_free(root);
-        free_overlays(ovl, novl);
+    if (b->in->pac_port && b->pac_dns_tag_too_long)
         return oops(err, errcap, "Тег DNS-сервера для PAC слишком длинный");
-    }
-    if (in->pac_port && (!dns || !pac_dns_vpn_server[0] || !pac_dns_system_server[0])) {
-        json_value_free(user_route_keep);
-        json_value_free(user_dns_keep);
-        json_value_free(root);
-        free_overlays(ovl, novl);
+    if (b->in->pac_port && (!b->dns || !b->pac_dns_vpn_server[0] || !b->pac_dns_system_server[0]))
         return oops(err, errcap, "Для PAC нужны dns.final и DNS-правило rule_set general");
-    }
 
-    if (!route) {
-        json_object_set_value(ro, "route", json_value_init_object());
-        route = json_object_get_object(ro, "route");
+    if (!b->route) {
+        json_object_set_value(b->ro, "route", json_value_init_object());
+        b->route = json_object_get_object(b->ro, "route");
     }
+    return 1;
+}
 
-    /* ---- outbounds ---- */
-    outbounds = json_value_init_array();
-    oarr = json_value_get_array(outbounds);
+/* direct, one outbound per profile (WireGuard ones as endpoints), the
+   selector, and PAC's SOCKS hop. */
+static int build_outbounds(build_state *b, char *err, size_t errcap)
+{
+    const genconf_input *in = b->in;
+    const profile_store *s = b->s;
+    JSON_Value *outbounds = json_value_init_array();
+    JSON_Array *oarr = json_value_get_array(outbounds);
+    char        active_tag[GENCONF_TAG_MAX] = { 0 };
+    int         i, active_ok = 0, active_awg = 0;
+
     {
         JSON_Value  *dv = json_value_init_object();
         json_object_set_string(json_value_get_object(dv), "type", "direct");
@@ -764,9 +687,9 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
             JSON_Value *ov;
 
             genconf_tag(s, i, tag, sizeof tag);
-            /* sing-box refuses AmneziaWG parameters, and without them the
-               server never answers. AmneziaWG runs in its own core, which
-               is not wired in yet: such a profile stays out of the config. */
+            /* sing-box refuses AmneziaWG parameters: the active AmneziaWG
+               profile becomes a direct outbound bound to the tunnel the
+               service raised; the others stay out of the config. */
             if (link_is_awg(&s->items[i].link)) {
                 JSON_Value *dv;
                 if (i != s->active) continue;         /* one tunnel at a time */
@@ -797,19 +720,15 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
         }
 
         /* Only ours: a user endpoint is dropped like a user outbound. */
-        json_object_remove(ro, "endpoints");
+        json_object_remove(b->ro, "endpoints");
         if (json_array_get_count(json_value_get_array(endpoints)))
-            json_object_set_value(ro, "endpoints", endpoints);
+            json_object_set_value(b->ro, "endpoints", endpoints);
         else
             json_value_free(endpoints);
 
         if (!active_ok) {
             json_value_free(sel_list);
             json_value_free(outbounds);
-            json_value_free(user_route_keep);
-            json_value_free(user_dns_keep);
-            json_value_free(root);
-            free_overlays(ovl, novl);
             return oops(err, errcap, active_awg
                 ? "Туннель AmneziaWG не поднят"
                 : "Активный сервер неизвестного типа");
@@ -837,28 +756,35 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
         json_object_set_string(o, "password", in->proxy_password);
         json_array_append_value(oarr, v);
     }
-    json_object_set_value(ro, "outbounds", outbounds);
+    json_object_set_value(b->ro, "outbounds", outbounds);
+    return 1;
+}
 
-    /* ---- rule set: ours, because we compile the list ---- */
-    {
-        JSON_Value  *setsv = json_value_init_array();
-        JSON_Value  *sv    = json_value_init_object();
-        JSON_Object *so    = json_value_get_object(sv);
+/* The rule set is ours, because we compile the list. */
+static void build_rule_set(build_state *b)
+{
+    JSON_Value  *setsv = json_value_init_array();
+    JSON_Value  *sv    = json_value_init_object();
+    JSON_Object *so    = json_value_get_object(sv);
 
-        json_object_set_string(so, "type", "local");
-        json_object_set_string(so, "tag", RULE_SET_TAG);
-        json_object_set_string(so, "format", "binary");
-        json_object_set_string(so, "path",
-                               in->rule_set_path ? in->rule_set_path
-                                                 : "list/general.srs");
-        json_array_append_value(json_value_get_array(setsv), sv);
-        json_object_set_value(route, "rule_set", setsv);
-    }
+    json_object_set_string(so, "type", "local");
+    json_object_set_string(so, "tag", RULE_SET_TAG);
+    json_object_set_string(so, "format", "binary");
+    json_object_set_string(so, "path",
+                           b->in->rule_set_path ? b->in->rule_set_path
+                                                : "list/general.srs");
+    json_array_append_value(json_value_get_array(setsv), sv);
+    json_object_set_value(b->route, "rule_set", setsv);
+}
 
-    /* ---- route rules: frame, then the user's, then the overlays, then the
-       rule that sends listed traffic into the selector ---- */
-    route_rules = json_value_init_array();
-    rarr = json_value_get_array(route_rules);
+/* Route rules: the frame, then the user's, then the overlays, then the rule
+   that sends listed traffic into the selector, then PAC's. */
+static void build_route_rules(build_state *b)
+{
+    const genconf_input *in = b->in;
+    JSON_Value *route_rules = json_value_init_array();
+    JSON_Array *rarr = json_value_get_array(route_rules);
+    int         i;
 
     if (in->pac_port && in->pac_dns_vpn_port && in->pac_dns_sys_port) {
         JSON_Value *v = json_value_init_object();
@@ -897,11 +823,11 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
         json_object_set_value(json_value_get_object(v), "process_path", pp);
         json_array_append_value(rarr, v);
     }
-    append_frame_head(rarr, s);
-    append_all(rarr, user_route_rules);
+    append_frame_head(rarr, b->s);
+    append_all(rarr, b->user_route_rules);
 
-    for (i = 0; i < novl; i++) {
-        JSON_Object *orr = json_object_get_object(json_value_get_object(ovl[i]), "route");
+    for (i = 0; i < b->novl; i++) {
+        JSON_Object *orr = json_object_get_object(json_value_get_object(b->ovl[i]), "route");
         if (orr) append_all(rarr, json_object_get_array(orr, "rules"));
     }
 
@@ -920,32 +846,35 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
         json_array_append_string(json_value_get_array(a), "udp");
         json_object_set_value(json_value_get_object(v), "network", a);
         json_array_append_value(rarr, v);
-        if (dns) json_object_set_boolean(dns, "reverse_mapping", 1);
+        if (b->dns) json_object_set_boolean(b->dns, "reverse_mapping", 1);
     }
-    json_object_set_value(route, "rules", route_rules);
+    json_object_set_value(b->route, "rules", route_rules);
+}
 
-    /* ---- dns: the bypass for server names, then the overlays, then the
-       user's. Overlays go before the user's rules for the same reason their
-       route rules go before the list rule: the base config's own DNS rule
-       for the list would otherwise answer first and the overlay would never
-       apply. */
-    if (!dns) {
-        for (i = 0; i < novl; i++)
-            if (json_object_get_object(json_value_get_object(ovl[i]), "dns")) break;
-        if (i < novl) {
-            json_object_set_value(ro, "dns", json_value_init_object());
-            dns = json_object_get_object(ro, "dns");
+/* DNS: the servers of the overlays; rules - PAC's inbounds, the bypass for
+   server names, the overlays', the user's. Overlays go before the user's
+   rules for the same reason their route rules go before the list rule: the
+   base config's own DNS rule for the list would otherwise answer first and
+   the overlay would never apply. Then PAC's DNS observer as dns.final. */
+static int build_dns(build_state *b, char *err, size_t errcap)
+{
+    const genconf_input *in = b->in;
+    const profile_store *s = b->s;
+    int i;
+
+    if (!b->dns) {
+        for (i = 0; i < b->novl; i++)
+            if (json_object_get_object(json_value_get_object(b->ovl[i]), "dns")) break;
+        if (i < b->novl) {
+            json_object_set_value(b->ro, "dns", json_value_init_object());
+            b->dns = json_object_get_object(b->ro, "dns");
         }
     }
-    if (dns && !merge_dns_servers(dns, ovl, novl, in, err, errcap)) {
-        json_value_free(user_route_keep);
-        json_value_free(user_dns_keep);
-        json_value_free(root);
-        free_overlays(ovl, novl);
-        return 0;
-    }
-    if (dns) {
+    if (b->dns && !merge_dns_servers(b->dns, b->ovl, b->novl, in, err, errcap)) return 0;
+    if (b->dns) {
         JSON_Value *hosts = json_value_init_array();
+        JSON_Value *dns_rules;
+        JSON_Array *darr;
 
         for (i = 0; i < s->count; i++) {
             const char *host = s->items[i].link.server;
@@ -958,7 +887,7 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
 
         if (in->pac_port && in->pac_dns_vpn_port && in->pac_dns_sys_port) {
             const char *tags[2] = { "utgard-pac-dns-vpn", "utgard-pac-dns-sys" };
-            const char *servers[2] = { pac_dns_vpn_server, pac_dns_system_server };
+            const char *servers[2] = { b->pac_dns_vpn_server, b->pac_dns_system_server };
             int k;
             for (k = 0; k < 2; k++) {
                 JSON_Value *v = json_value_init_object();
@@ -981,31 +910,35 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
             json_value_free(hosts);
         }
 
-        for (i = 0; i < novl; i++) {
-            JSON_Object *od = json_object_get_object(json_value_get_object(ovl[i]), "dns");
+        for (i = 0; i < b->novl; i++) {
+            JSON_Object *od = json_object_get_object(json_value_get_object(b->ovl[i]), "dns");
             if (od) append_all(darr, json_object_get_array(od, "rules"));
         }
-        append_all(darr, user_dns_rules);
-        json_object_set_value(dns, "rules", dns_rules);
+        append_all(darr, b->user_dns_rules);
+        json_object_set_value(b->dns, "rules", dns_rules);
     }
 
-    if (in->pac_port && in->pac_dns_port && dns) {
+    if (in->pac_port && in->pac_dns_port && b->dns) {
         JSON_Value *v = json_value_init_object();
         JSON_Object *o = json_value_get_object(v);
-        JSON_Array *servers = json_object_get_array(dns, "servers");
+        JSON_Array *servers = json_object_get_array(b->dns, "servers");
         json_object_set_string(o, "type", "udp");
         json_object_set_string(o, "tag", "utgard-pac-dns");
         json_object_set_string(o, "server", "127.0.0.1");
         json_object_set_number(o, "server_port", in->pac_dns_port);
         if (servers) json_array_append_value(servers, v); else json_value_free(v);
-        json_object_set_string(dns, "final", "utgard-pac-dns");
+        json_object_set_string(b->dns, "final", "utgard-pac-dns");
     }
-    json_value_free(user_route_keep);
-    json_value_free(user_dns_keep);
-    free_overlays(ovl, novl);
+    return 1;
+}
 
-    /* Settings from the client window win over config.json, in the generated
-       file only. The tun inbound is found by type, not by position or tag. */
+/* Settings from the client window win over config.json, in the generated
+   config only. The tun inbound is found by type, not by position or tag. */
+static void apply_settings(build_state *b)
+{
+    const genconf_input *in = b->in;
+    JSON_Object *ro = b->ro;
+
     if (in->mtu > 0) {
         JSON_Array *inb = json_object_get_array(ro, "inbounds");
         size_t      k, cnt = inb ? json_array_get_count(inb) : 0;
@@ -1035,8 +968,7 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
             json_array_append_string(ex, prefix);
         }
     }
-    /* A fixed name for sing-box's adapter, so that the next start can wait
-       until this one is gone (tunnames.h). */
+    /* A fixed name for sing-box's adapter (tunnames.h). */
     {
         JSON_Array *inb = json_object_get_array(ro, "inbounds");
         size_t      k, cnt = inb ? json_array_get_count(inb) : 0;
@@ -1060,8 +992,8 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
     /* Only the server tagged "doh" is redirected: host, type (HTTP/3 or
        HTTP/2) and path are what the setting chooses; port and the resolver
        used to find the host stay. */
-    if (in->dns_host && in->dns_host[0] && dns) {
-        JSON_Array *servers = json_object_get_array(dns, "servers");
+    if (in->dns_host && in->dns_host[0] && b->dns) {
+        JSON_Array *servers = json_object_get_array(b->dns, "servers");
         size_t      k, cnt = servers ? json_array_get_count(servers) : 0;
         for (k = 0; k < cnt; k++) {
             JSON_Object *o = json_array_get_object(servers, k);
@@ -1081,107 +1013,141 @@ int genconf_build(const genconf_input *in, char **out_text, char *err, size_t er
         }
         json_object_set_string(log, "level", in->log_level);
     }
+}
 
-    /* ---- sanitising -------------------------------------------------------
-       sing-box runs elevated, and config.json is a file the user - or anything
-       running as the user - can edit. Several of its fields make sing-box write
-       to disk wherever they point: log.output, experimental.cache_file.path,
-       experimental.clash_api.external_ui with a download URL (fetches an archive
-       and unpacks it), tls.acme.data_directory on inbounds, the services
-       section. All were checked against sing-box 1.14.1, which accepts them.
-       So the generated file is rebuilt from an allow-list rather than cleaned
-       by a deny-list: only what this client uses survives, and sections that
-       future sing-box versions add are dropped without anyone having to know
-       about them. */
-    {
-        static const char *const keep[] = { "log", "dns", "inbounds", "outbounds", "endpoints", "route" };
-        JSON_Value  *clean  = json_value_init_object();
-        JSON_Object *co     = json_value_get_object(clean);
-        JSON_Object *oldlog = json_object_get_object(ro, "log");
-        JSON_Array  *oldin  = json_object_get_array(ro, "inbounds");
-        size_t       k;
+/* sing-box runs elevated, and config.json is a file the user - or anything
+   running as the user - can edit. Several of its fields make sing-box write
+   to disk wherever they point: log.output, experimental.cache_file.path,
+   experimental.clash_api.external_ui with a download URL (fetches an archive
+   and unpacks it), tls.acme.data_directory on inbounds, the services
+   section. All were checked against sing-box 1.14.1, which accepts them.
+   So the generated config is rebuilt from an allow-list rather than cleaned
+   by a deny-list: only what this client uses survives, and sections that
+   future sing-box versions add are dropped without anyone having to know
+   about them. Replaces b->root. */
+static void keep_allowed(build_state *b)
+{
+    static const char *const keep[] = { "log", "dns", "inbounds", "outbounds", "endpoints", "route" };
+    const genconf_input *in = b->in;
+    JSON_Value  *clean  = json_value_init_object();
+    JSON_Object *co     = json_value_get_object(clean);
+    JSON_Object *oldlog = json_object_get_object(b->ro, "log");
+    JSON_Array  *oldin  = json_object_get_array(b->ro, "inbounds");
+    size_t       k;
 
-        for (k = 0; k < sizeof keep / sizeof keep[0]; k++) {
-            JSON_Value *v;
-            if (strcmp(keep[k], "log") == 0 || strcmp(keep[k], "inbounds") == 0) continue;
-            v = json_object_get_value(ro, keep[k]);
-            if (v) json_object_set_value(co, keep[k], json_value_deep_copy(v));
-        }
-
-        /* log: level, timestamp and disabled from the user; the output path is
-           always ours, relative to the working directory sing-box runs in. */
-        {
-            JSON_Value  *lv = json_value_init_object();
-            JSON_Object *lo = json_value_get_object(lv);
-            const char  *level = oldlog ? json_object_get_string(oldlog, "level") : NULL;
-
-            json_object_set_string(lo, "level", level ? level : "warn");
-            if (oldlog && json_object_has_value_of_type(oldlog, "timestamp", JSONBoolean))
-                json_object_set_boolean(lo, "timestamp", json_object_get_boolean(oldlog, "timestamp"));
-            if (oldlog && json_object_has_value_of_type(oldlog, "disabled", JSONBoolean))
-                json_object_set_boolean(lo, "disabled", json_object_get_boolean(oldlog, "disabled"));
-            json_object_set_string(lo, "output", "logs/sing-box.log");
-            json_object_set_value(co, "log", lv);
-        }
-
-        /* inbounds: the tunnel only. Any other inbound either opens a proxy to
-           the network or can carry TLS with an ACME directory to write into. */
-        {
-            JSON_Value *iv = json_value_init_array();
-            size_t      cnt = oldin ? json_array_get_count(oldin) : 0;
-            for (k = 0; k < cnt; k++) {
-                JSON_Object *o = json_array_get_object(oldin, k);
-                const char  *type = o ? json_object_get_string(o, "type") : NULL;
-                if (type && strcmp(type, "tun") == 0)
-                    json_array_append_value(json_value_get_array(iv),
-                                            json_value_deep_copy(json_array_get_value(oldin, k)));
-            }
-            /* Only this app-generated, loopback and authenticated listener
-               is allowed in addition to the user's TUN. */
-            if (in->vpn_proxy_port && in->proxy_password) {
-                JSON_Value *v = json_value_init_object(), *users = json_value_init_array();
-                JSON_Value *user = json_value_init_object();
-                JSON_Object *o = json_value_get_object(v);
-                json_object_set_string(o, "type", "mixed");
-                json_object_set_string(o, "tag", "utgard-vpn-proxy");
-                json_object_set_string(o, "listen", "127.0.0.1");
-                json_object_set_number(o, "listen_port", in->vpn_proxy_port);
-                json_object_set_string(json_value_get_object(user), "username", "utgard");
-                json_object_set_string(json_value_get_object(user), "password", in->proxy_password);
-                json_array_append_value(json_value_get_array(users), user);
-                json_object_set_value(o, "users", users);
-                json_array_append_value(json_value_get_array(iv), v);
-            }
-            if (in->pac_port && in->pac_dns_vpn_port && in->pac_dns_sys_port) {
-                const char *tags[2] = { "utgard-pac-dns-vpn", "utgard-pac-dns-sys" };
-                int ports[2] = { in->pac_dns_vpn_port, in->pac_dns_sys_port };
-                int j;
-                for (j = 0; j < 2; j++) {
-                    JSON_Value *v = json_value_init_object();
-                    JSON_Object *o = json_value_get_object(v);
-                    json_object_set_string(o, "type", "direct");
-                    json_object_set_string(o, "tag", tags[j]);
-                    json_object_set_string(o, "listen", "127.0.0.1");
-                    json_object_set_number(o, "listen_port", ports[j]);
-                    {
-                        JSON_Value *networks = json_value_init_array();
-                        json_array_append_string(json_value_get_array(networks), "tcp");
-                        json_array_append_string(json_value_get_array(networks), "udp");
-                        json_object_set_value(o, "network", networks);
-                    }
-                    json_array_append_value(json_value_get_array(iv), v);
-                }
-            }
-            json_object_set_value(co, "inbounds", iv);
-        }
-
-        json_value_free(root);
-        root = clean;
-        ro   = co;
+    for (k = 0; k < sizeof keep / sizeof keep[0]; k++) {
+        JSON_Value *v;
+        if (strcmp(keep[k], "log") == 0 || strcmp(keep[k], "inbounds") == 0) continue;
+        v = json_object_get_value(b->ro, keep[k]);
+        if (v) json_object_set_value(co, keep[k], json_value_deep_copy(v));
     }
 
-    *out_text = json_serialize_to_string(root);
-    json_value_free(root);
-    if (!*out_text) return oops(err, errcap, "Не хватило памяти для конфигурации");
-    return 1;
+    /* log: level, timestamp and disabled from the user; the output path is
+       always ours, relative to the working directory sing-box runs in. */
+    {
+        JSON_Value  *lv = json_value_init_object();
+        JSON_Object *lo = json_value_get_object(lv);
+        const char  *level = oldlog ? json_object_get_string(oldlog, "level") : NULL;
+
+        json_object_set_string(lo, "level", level ? level : "warn");
+        if (oldlog && json_object_has_value_of_type(oldlog, "timestamp", JSONBoolean))
+            json_object_set_boolean(lo, "timestamp", json_object_get_boolean(oldlog, "timestamp"));
+        if (oldlog && json_object_has_value_of_type(oldlog, "disabled", JSONBoolean))
+            json_object_set_boolean(lo, "disabled", json_object_get_boolean(oldlog, "disabled"));
+        json_object_set_string(lo, "output", "logs/sing-box.log");
+        json_object_set_value(co, "log", lv);
+    }
+
+    /* inbounds: the tunnel only. Any other inbound either opens a proxy to
+       the network or can carry TLS with an ACME directory to write into. */
+    {
+        JSON_Value *iv = json_value_init_array();
+        size_t      cnt = oldin ? json_array_get_count(oldin) : 0;
+        for (k = 0; k < cnt; k++) {
+            JSON_Object *o = json_array_get_object(oldin, k);
+            const char  *type = o ? json_object_get_string(o, "type") : NULL;
+            if (type && strcmp(type, "tun") == 0)
+                json_array_append_value(json_value_get_array(iv),
+                                        json_value_deep_copy(json_array_get_value(oldin, k)));
+        }
+        /* Only this app-generated, loopback and authenticated listener
+           is allowed in addition to the user's TUN. */
+        if (in->vpn_proxy_port && in->proxy_password) {
+            JSON_Value *v = json_value_init_object(), *users = json_value_init_array();
+            JSON_Value *user = json_value_init_object();
+            JSON_Object *o = json_value_get_object(v);
+            json_object_set_string(o, "type", "mixed");
+            json_object_set_string(o, "tag", "utgard-vpn-proxy");
+            json_object_set_string(o, "listen", "127.0.0.1");
+            json_object_set_number(o, "listen_port", in->vpn_proxy_port);
+            json_object_set_string(json_value_get_object(user), "username", "utgard");
+            json_object_set_string(json_value_get_object(user), "password", in->proxy_password);
+            json_array_append_value(json_value_get_array(users), user);
+            json_object_set_value(o, "users", users);
+            json_array_append_value(json_value_get_array(iv), v);
+        }
+        if (in->pac_port && in->pac_dns_vpn_port && in->pac_dns_sys_port) {
+            const char *tags[2] = { "utgard-pac-dns-vpn", "utgard-pac-dns-sys" };
+            int ports[2] = { in->pac_dns_vpn_port, in->pac_dns_sys_port };
+            int j;
+            for (j = 0; j < 2; j++) {
+                JSON_Value *v = json_value_init_object();
+                JSON_Object *o = json_value_get_object(v);
+                json_object_set_string(o, "type", "direct");
+                json_object_set_string(o, "tag", tags[j]);
+                json_object_set_string(o, "listen", "127.0.0.1");
+                json_object_set_number(o, "listen_port", ports[j]);
+                {
+                    JSON_Value *networks = json_value_init_array();
+                    json_array_append_string(json_value_get_array(networks), "tcp");
+                    json_array_append_string(json_value_get_array(networks), "udp");
+                    json_object_set_value(o, "network", networks);
+                }
+                json_array_append_value(json_value_get_array(iv), v);
+            }
+        }
+        json_object_set_value(co, "inbounds", iv);
+    }
+
+    json_value_free(b->root);
+    b->root = clean;
+    b->ro   = co;
+}
+
+/* ---- the build ------------------------------------------------------ */
+
+int genconf_build(const genconf_input *in, char **out_text, char *err, size_t errcap)
+{
+    build_state b;
+    int         ok = 0;
+
+    if (out_text) *out_text = NULL;
+    if (!in || !in->base.text || !out_text || !in->store ||
+        (in->overlay_count > 0 && !in->overlays))
+        return oops(err, errcap, "Генератору не переданы обязательные данные");
+    if (in->store->count <= 0)
+        return oops(err, errcap, "Нет ни одного сервера");
+    if (in->store->active < 0 || in->store->active >= in->store->count)
+        return oops(err, errcap, "Не выбран активный сервер");
+
+    memset(&b, 0, sizeof b);
+    b.in = in;
+    b.s  = in->store;
+    if (parse_inputs(&b, err, errcap) &&
+        keep_user_rules(&b, err, errcap) &&
+        build_outbounds(&b, err, errcap)) {
+        build_rule_set(&b);
+        build_route_rules(&b);
+        if (build_dns(&b, err, errcap)) {
+            apply_settings(&b);
+            keep_allowed(&b);
+            *out_text = json_serialize_to_string(b.root);
+            ok = *out_text ? 1 : oops(err, errcap, "Не хватило памяти для конфигурации");
+        }
+    }
+    json_value_free(b.user_route_keep);
+    json_value_free(b.user_dns_keep);
+    if (b.ovl) free_overlays(b.ovl, b.novl);
+    json_value_free(b.root);
+    return ok;
 }

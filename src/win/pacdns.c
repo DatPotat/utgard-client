@@ -10,7 +10,7 @@
 #include <string.h>
 
 static SRWLOCK cache_lock = SRWLOCK_INIT;
-static struct { unsigned char ip[16]; int family; char name[256]; ULONGLONG until, serial; } cache[2048];
+static struct { unsigned char ip[16]; int family; char name[DNS_NAME_SIZE]; ULONGLONG until, serial; } cache[2048];
 static ULONGLONG serial;
 /* Concurrent DNS jobs. Each job marks at most one name as being evaluated,
    so a guard table of the same size can never fill up: a refusal from the
@@ -21,11 +21,11 @@ static unsigned short route_vpn_port, route_sys_port;
 static int local_port;
 static HANDLE interface_notify;
 static SRWLOCK evaluating_lock = SRWLOCK_INIT;
-static char evaluating[DNS_JOBS_MAX][256];
+static char evaluating[DNS_JOBS_MAX][DNS_NAME_SIZE];
 
 static unsigned get16(const unsigned char *p) { return ((unsigned)p[0] << 8) | p[1]; }
 
-static int dns_name(const unsigned char *p, size_t size, size_t *at, char name[256])
+static int dns_name(const unsigned char *p, size_t size, size_t *at, char name[DNS_NAME_SIZE])
 {
     size_t pos = *at, written = 0; int jumps = 0, indirect = 0;
     while (pos < size) {
@@ -41,7 +41,7 @@ static int dns_name(const unsigned char *p, size_t size, size_t *at, char name[2
             pos = ((n & 63) << 8) | p[pos]; indirect = 1;
         } else {
             unsigned i;
-            if (n > 63 || pos + n > size || written + n + 1 >= 256) return 0;
+            if (n > 63 || pos + n > size || written + n + 1 >= DNS_NAME_SIZE) return 0;
             if (written) name[written++] = '.';
             for (i = 0; i < n; i++) {
                 unsigned char c = p[pos++];
@@ -56,7 +56,7 @@ static int dns_name(const unsigned char *p, size_t size, size_t *at, char name[2
 
 static void remember(const unsigned char *packet, int length)
 {
-    size_t at = 12; char name[256], owner[256]; unsigned i, answers;
+    size_t at = 12; char name[DNS_NAME_SIZE], owner[DNS_NAME_SIZE]; unsigned i, answers;
     if (length < 12 || get16(packet + 4) != 1 || !(packet[2] & 0x80) || (packet[3] & 15) ||
         !dns_name(packet, length, &at, name) || at + 4 > (size_t)length) return;
     at += 4; answers = get16(packet + 6);
@@ -76,7 +76,7 @@ static void remember(const unsigned char *packet, int length)
                 if (cache[k].serial < cache[slot].serial) slot = k;
             }
             memcpy(cache[slot].ip, packet + at, bytes); cache[slot].family = bytes;
-            StringCchCopyA(cache[slot].name, 256, name);
+            StringCchCopyA(cache[slot].name, DNS_NAME_SIZE, name);
             /* A day at most: a huge TTL must not pin an answer for the session. */
             cache[slot].until = GetTickCount64() + (ULONGLONG)(ttl > 86400 ? 86400 : ttl) * 1000;
             cache[slot].serial = ++serial;
@@ -86,13 +86,13 @@ static void remember(const unsigned char *packet, int length)
     }
 }
 
-int pacdns_names(const unsigned char *ip, int ipv6, char names[][256], int max_names)
+int pacdns_names(const unsigned char *ip, int ipv6, char names[][DNS_NAME_SIZE], int max_names)
 {
     size_t i; int found = 0, bytes = ipv6 ? 16 : 4; ULONGLONG now = GetTickCount64();
     AcquireSRWLockShared(&cache_lock);
     for (i = 0; i < 2048 && found < max_names; i++)
         if (cache[i].family == bytes && cache[i].until > now && !memcmp(cache[i].ip, ip, bytes))
-            StringCchCopyA(names[found++], 256, cache[i].name);
+            StringCchCopyA(names[found++], DNS_NAME_SIZE, cache[i].name);
     ReleaseSRWLockShared(&cache_lock); return found;
 }
 
@@ -140,7 +140,7 @@ static DWORD WINAPI answer(void *arg)
 {
     dns_job *j = (dns_job *)arg; SOCKET upstream = INVALID_SOCKET;
     unsigned char prefix[2], id[2]; int length = j->length, target_vpn = 0, entered = 0;
-    char name[256] = {0}; size_t at = 12; unsigned qtype = 0; struct sockaddr_in target;
+    char name[DNS_NAME_SIZE] = {0}; size_t at = 12; unsigned qtype = 0; struct sockaddr_in target;
     if (j->tcp) {
         timeouts(j->client);
         if (!io(j->client, prefix, 2, 0)) goto done;

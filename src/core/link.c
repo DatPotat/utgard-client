@@ -6,6 +6,7 @@
 
 #include "parson.h"
 #include "puff.h"
+#include "errmsg.h"
 
 /* ---- small bounded helpers ------------------------------------------ */
 
@@ -23,17 +24,6 @@ static void append_bounded(char *dst, size_t cap, const char *src)
 {
     size_t have = strlen(dst);
     if (have < cap) copy_bounded(dst + have, cap - have, src);
-}
-
-static int oops(char *err, size_t cap, const char *msg)
-{
-    if (err && cap) {
-        size_t n = strlen(msg);
-        if (n >= cap) n = cap - 1;
-        memcpy(err, msg, n);
-        err[n] = '\0';
-    }
-    return 0;
 }
 
 /* Copy len bytes and terminate. Fails rather than truncating: a silently

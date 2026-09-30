@@ -34,7 +34,7 @@ static int thumb(HWND target, int track, int *top, int *height)
     range = si.nMax - si.nMin + 1;
     if (si.nPage == 0 || (int)si.nPage >= range) return 0;
     *height = (int)((long long)track * (int)si.nPage / range);
-    if (*height < S(24)) *height = S(24);
+    if (*height < scaled(24)) *height = scaled(24);
     *top = (int)((long long)(track - *height) * (si.nPos - si.nMin) / (range - (int)si.nPage));
     return 1;
 }
@@ -71,7 +71,7 @@ static LRESULT CALLBACK sb_proc(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     if (!st) return DefWindowProcW(h, m, w, l);
     GetClientRect(h, &c);
-    track = c.bottom - S(8);
+    track = c.bottom - scaled(8);
     switch (m) {
     case WM_ERASEBKGND:
         return 1;
@@ -87,9 +87,9 @@ static LRESULT CALLBACK sb_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         DeleteObject(b);
         if (thumb(st->target, track, &top, &height)) {
             RECT t;
-            int  wdt = (st->hot || st->drag) ? S(8) : S(6);
+            int  wdt = (st->hot || st->drag) ? scaled(8) : scaled(6);
             t.left = (c.right - wdt) / 2; t.right = t.left + wdt;
-            t.top = S(4) + top; t.bottom = t.top + height;
+            t.top = scaled(4) + top; t.bottom = t.top + height;
             rounded_r(mem, &t, (st->hot || st->drag) ? CLR_MUTED : CLR_BORDER,
                       (st->hot || st->drag) ? CLR_MUTED : CLR_BORDER, wdt / 2);
         }
@@ -109,7 +109,7 @@ static LRESULT CALLBACK sb_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         if (st->drag && thumb(st->target, track, &top, &height)) {
             SCROLLINFO si;
-            int y = GET_Y_LPARAM(l) - S(4) - st->grab;
+            int y = GET_Y_LPARAM(l) - scaled(4) - st->grab;
             ZeroMemory(&si, sizeof si);
             si.cbSize = sizeof si; si.fMask = SIF_ALL;
             GetScrollInfo(st->target, SB_VERT, &si);
@@ -125,7 +125,7 @@ static LRESULT CALLBACK sb_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_LBUTTONDOWN:
         if (thumb(st->target, track, &top, &height)) {
-            int y = GET_Y_LPARAM(l) - S(4);
+            int y = GET_Y_LPARAM(l) - scaled(4);
             if (y >= top && y < top + height) {
                 st->drag = 1;
                 st->grab = y - top;
@@ -217,7 +217,7 @@ void scroll_place(HWND target)
     show = (GetWindowLongPtrW(target, GWL_STYLE) & WS_VSCROLL) != 0 && IsWindowVisible(target);
     SetPropW(target, SBV_PROP, (HANDLE)(INT_PTR)(1 + show));
 
-    rg = CreateRoundRectRgn(0, 0, w + 1, h + 1, S(22), S(22));
+    rg = CreateRoundRectRgn(0, 0, w + 1, h + 1, scaled(22), scaled(22));
     if (show) {
         HRGN cut = CreateRectRgn(0, 0, w - bw, h);
         CombineRgn(rg, rg, cut, RGN_AND);
@@ -228,7 +228,7 @@ void scroll_place(HWND target)
     if (!show) { ShowWindow(sb, SW_HIDE); return; }
     SetWindowPos(sb, HWND_TOP, r.right - bw, r.top, bw, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     /* Only the right-hand corners are rounded: the region starts left of it. */
-    SetWindowRgn(sb, CreateRoundRectRgn(-S(24), 0, bw + 1, h + 1, S(22), S(22)), TRUE);
+    SetWindowRgn(sb, CreateRoundRectRgn(-scaled(24), 0, bw + 1, h + 1, scaled(22), scaled(22)), TRUE);
 }
 
 /* After anything that may have scrolled the control: redraw our bar, and
