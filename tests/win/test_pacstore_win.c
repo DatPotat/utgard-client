@@ -66,6 +66,7 @@ static int file_has(const char *path, const char *needle)
 int main(void)
 {
     pac_store s; wchar_t aside[2048];
+    CreateDirectoryW(L"list", NULL);   /* main.c creates it at startup */
     DeleteFileW(L"list\\pac\\01.pac"); DeleteFileW(L"list\\pac\\02.pac"); DeleteFileW(L"pac.json");
 
     /* 1. pac.json of 2.3.1 moves into list\pac, and goes. */

@@ -1,0 +1,134 @@
+name: build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LLVM_MINGW: llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64
+  LLVM_MINGW_URL: https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz
+  LLVM_MINGW_SHA256: bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21
+  SINGBOX: sing-box-1.14.1-linux-amd64
+  SINGBOX_URL: https://github.com/SagerNet/sing-box/releases/download/v1.14.1/sing-box-1.14.1-linux-amd64.tar.gz
+  SINGBOX_SHA256: 12cb2816b52febb356f6a885b740cc8758c3f30b8ae0ca8edba80f0d2d35343f
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch pinned toolchain and sing-box
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o llvm-mingw.tar.xz "$LLVM_MINGW_URL"
+          echo "$LLVM_MINGW_SHA256  llvm-mingw.tar.xz" | sha256sum -c -
+          tar -xJf llvm-mingw.tar.xz
+          curl -fsSL -o sing-box.tar.gz "$SINGBOX_URL"
+          echo "$SINGBOX_SHA256  sing-box.tar.gz" | sha256sum -c -
+          tar -xzf sing-box.tar.gz
+          echo "$RUNNER_TEMP/$LLVM_MINGW/bin" >> "$GITHUB_PATH"
+
+      - name: Host tests
+        run: SINGBOX="$RUNNER_TEMP/$SINGBOX/sing-box" sh tests/run.sh
+
+      - name: Build x64
+        run: ARCH=x64 CC=x86_64-w64-mingw32-clang WINDRES=x86_64-w64-mingw32-windres sh build.sh
+
+      - name: Build arm64
+        run: ARCH=arm64 sh build.sh
+
+      - name: Build Windows tests
+        run: |
+          flags=(-std=c11 -Wall -Wextra -Werror -Isrc/core -Isrc/win -Ivendor/parson -Ivendor/puff)
+          for arch in x86_64 aarch64; do
+            cc="$arch-w64-mingw32-clang"
+            out="win-tests/$arch"
+            mkdir -p "$out"
+            "$cc" "${flags[@]}" -o "$out/test_profiles_win.exe" tests/win/test_profiles_win.c \
+              src/win/profstore.c src/core/profiles.c src/win/fileio.c -lcrypt32
+            "$cc" "${flags[@]}" -o "$out/test_pacstore_win.exe" tests/win/test_pacstore_win.c \
+              src/win/pacstore.c src/win/fileio.c src/core/pacblob.c vendor/parson/parson.c -lcrypt32
+            "$cc" "${flags[@]}" -o "$out/test_genconf_paths_win.exe" tests/win/test_genconf_paths_win.c \
+              src/win/confread.c src/core/genconf.c src/core/defconfig.c src/core/link.c \
+              vendor/parson/parson.c vendor/puff/puff.c
+          done
+
+      - name: Package
+        run: |
+          cd release
+          for d in utgard-client-*-windows-*; do
+            zip -qrX "$d.zip" "$d"
+          done
+          sha256sum -- *.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release
+          path: |
+            release/*.zip
+            release/SHA256SUMS
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: win-tests-x64
+          path: win-tests/x86_64/*.exe
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: win-tests-arm64
+          path: win-tests/aarch64/*.exe
+          if-no-files-found: error
+
+  test-windows:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            tests: win-tests-x64
+          - runner: windows-11-arm
+            tests: win-tests-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ matrix.tests }}
+          path: win-tests
+
+      - name: Run Windows tests
+        shell: bash
+        run: |
+          for t in test_profiles_win test_pacstore_win test_genconf_paths_win; do
+            mkdir "run-$t"
+            cp "win-tests/$t.exe" "run-$t/"
+            (cd "run-$t" && "./$t.exe")
+          done
+
+  attest:
+    needs: [build, test-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release
+          path: release
+
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release/*.zip
