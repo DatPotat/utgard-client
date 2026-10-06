@@ -53,18 +53,30 @@ AmneziaWG for Windows 3.1.0 (amneziawg-windows-client)
   program (a Windows service for the duration of a session); it is not
   linked into utgard.exe.
   License: MIT (amneziawg-windows-client, amneziawg-windows, amneziawg-go).
-  The installer package carries no license file; the text reads:
+  The installer package carries no license file. The text below is the
+  COPYING file of amneziawg-windows-client at tag 3.1.0
+  (commit ca5dd3b983bd19c335ab095ccd21fc2f804ec968):
+
+    Copyright (C) 2018-2022 WireGuard LLC. All Rights Reserved.
+
     Permission is hereby granted, free of charge, to any person obtaining a
-    copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions: The above copyright notice and this
-    permission notice shall be included in all copies or substantial
-    portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT
-    WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
-  Copyright (C) 2017-2025 WireGuard LLC and contributors.
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+
   Source: https://github.com/amnezia-vpn/amneziawg-windows-client/tree/3.1.0
 
 Wintun 0.14.1 (wintun.dll)

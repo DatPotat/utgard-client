@@ -1,0 +1,294 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "utgard-client-2.3.2",
+  "documentNamespace": "https://github.com/DatPotat/utgard-client/spdx/2.3.2-54dbd2e0-c2a7-4554-85a3-112c0d800bb2",
+  "creationInfo": {
+    "created": "2026-10-06T07:26:23Z",
+    "creators": [
+      "Person: DatPotat"
+    ]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-parson",
+      "name": "Parson",
+      "versionInfo": "1.5.4",
+      "downloadLocation": "https://github.com/kgabis/parson",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright (c) 2012 - 2026 Krzysztof Gabis",
+      "primaryPackagePurpose": "LIBRARY",
+      "supplier": "Person: Krzysztof Gabis"
+    },
+    {
+      "SPDXID": "SPDXRef-puff",
+      "name": "puff",
+      "versionInfo": "2.3",
+      "downloadLocation": "https://github.com/madler/zlib",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Zlib",
+      "licenseDeclared": "Zlib",
+      "copyrightText": "Copyright (C) 2002-2013 Mark Adler",
+      "primaryPackagePurpose": "LIBRARY",
+      "supplier": "Person: Mark Adler",
+      "comment": "contrib/puff from zlib 1.3.2, unmodified."
+    },
+    {
+      "SPDXID": "SPDXRef-ruslan-display",
+      "name": "Ruslan Display",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "https://github.com/google/fonts/tree/main/ofl/ruslandisplay",
+      "filesAnalyzed": false,
+      "licenseConcluded": "OFL-1.1",
+      "licenseDeclared": "OFL-1.1",
+      "copyrightText": "Copyright 2011 Oleg Snarsky, Denis Masharov, Vladimir Rabdu",
+      "primaryPackagePurpose": "FILE",
+      "supplier": "NOASSERTION",
+      "comment": "RuslanDisplay-Regular.ttf, taken unmodified on 2026-09-28; embedded as a resource.",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "6fb5f4db06869e886ca5da3760c547c6d3ebec82aebd3678f314e99ae3347b09"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-lucide",
+      "name": "Lucide icons",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "https://github.com/lucide-icons/lucide",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC AND MIT",
+      "licenseDeclared": "ISC AND MIT",
+      "copyrightText": "Copyright (c) 2026 Lucide Icons and Contributors",
+      "primaryPackagePurpose": "OTHER",
+      "supplier": "NOASSERTION",
+      "comment": "Outlines of 17 icons as SVG path data (src/ui/icons_lucide.h), snapshot of 2026-09-28. Icons derived from Feather are MIT."
+    },
+    {
+      "SPDXID": "SPDXRef-utgard-client-x64",
+      "name": "utgard-client-windows-x64",
+      "versionInfo": "2.3.2",
+      "downloadLocation": "https://github.com/DatPotat/utgard-client/releases/download/2.3.2/utgard-client-2.3.2-windows-x64.zip",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright (c) 2026 DatPotat",
+      "primaryPackagePurpose": "APPLICATION",
+      "supplier": "Person: DatPotat",
+      "comment": "Release archive built by GitHub Actions; its SHA-256 is in SHA256SUMS of the release."
+    },
+    {
+      "SPDXID": "SPDXRef-sing-box-x64",
+      "name": "sing-box-windows-amd64",
+      "versionInfo": "1.14.1",
+      "downloadLocation": "https://github.com/SagerNet/sing-box/releases/download/v1.14.1/sing-box-1.14.1-windows-amd64.zip",
+      "filesAnalyzed": false,
+      "licenseConcluded": "GPL-3.0-or-later",
+      "licenseDeclared": "GPL-3.0-or-later",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "APPLICATION",
+      "supplier": "Organization: SagerNet",
+      "comment": "Not included in the Utgard archive. Downloaded by Utgard on first start and verified against SHA-256 values built into utgard.exe; runs as a separate program. The project's LICENSE adds a term on use of the name.",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "5197f16d492d93202dc623622149a6ed040f8eca263128f91d603f2b901baa89"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-amneziawg-x64",
+      "name": "amneziawg-windows-amd64",
+      "versionInfo": "3.1.0",
+      "downloadLocation": "https://github.com/amnezia-vpn/amneziawg-windows-client/releases/download/3.1.0/amneziawg-amd64-3.1.0.msi",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright (C) 2018-2022 WireGuard LLC. All Rights Reserved.",
+      "primaryPackagePurpose": "INSTALL",
+      "supplier": "Organization: amnezia-vpn",
+      "comment": "Not included in the Utgard archive. Downloaded only when an AmneziaWG profile is first needed, verified against SHA-256 values built into utgard.exe, unpacked without installing.",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "a1b48ea8699cd347832a3691d832004574ef8ad65bcf887611ac8acb99b7de8b"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-wintun-x64",
+      "name": "wintun-amd64",
+      "versionInfo": "0.14.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY",
+      "supplier": "Organization: WireGuard LLC",
+      "comment": "wintun.dll from the AmneziaWG package above, used unmodified under the Wintun Prebuilt Binaries License of WireGuard LLC (https://www.wintun.net/). Not redistributed by Utgard.",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-utgard-client-arm64",
+      "name": "utgard-client-windows-arm64",
+      "versionInfo": "2.3.2",
+      "downloadLocation": "https://github.com/DatPotat/utgard-client/releases/download/2.3.2/utgard-client-2.3.2-windows-arm64.zip",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright (c) 2026 DatPotat",
+      "primaryPackagePurpose": "APPLICATION",
+      "supplier": "Person: DatPotat",
+      "comment": "Release archive built by GitHub Actions; its SHA-256 is in SHA256SUMS of the release."
+    },
+    {
+      "SPDXID": "SPDXRef-sing-box-arm64",
+      "name": "sing-box-windows-arm64",
+      "versionInfo": "1.14.1",
+      "downloadLocation": "https://github.com/SagerNet/sing-box/releases/download/v1.14.1/sing-box-1.14.1-windows-arm64.zip",
+      "filesAnalyzed": false,
+      "licenseConcluded": "GPL-3.0-or-later",
+      "licenseDeclared": "GPL-3.0-or-later",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "APPLICATION",
+      "supplier": "Organization: SagerNet",
+      "comment": "Not included in the Utgard archive. Downloaded by Utgard on first start and verified against SHA-256 values built into utgard.exe; runs as a separate program. The project's LICENSE adds a term on use of the name.",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "58852d744056b76d1da08ad57e0f93e86fff11df49ab26a026ea4af3da840980"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-amneziawg-arm64",
+      "name": "amneziawg-windows-arm64",
+      "versionInfo": "3.1.0",
+      "downloadLocation": "https://github.com/amnezia-vpn/amneziawg-windows-client/releases/download/3.1.0/amneziawg-arm64-3.1.0.msi",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright (C) 2018-2022 WireGuard LLC. All Rights Reserved.",
+      "primaryPackagePurpose": "INSTALL",
+      "supplier": "Organization: amnezia-vpn",
+      "comment": "Not included in the Utgard archive. Downloaded only when an AmneziaWG profile is first needed, verified against SHA-256 values built into utgard.exe, unpacked without installing.",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "3aec023884944890fac151f9cd4be3e92d39f9987c49da248837529c006ea2aa"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-wintun-arm64",
+      "name": "wintun-arm64",
+      "versionInfo": "0.14.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY",
+      "supplier": "Organization: WireGuard LLC",
+      "comment": "wintun.dll from the AmneziaWG package above, used unmodified under the Wintun Prebuilt Binaries License of WireGuard LLC (https://www.wintun.net/). Not redistributed by Utgard.",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "f7ba89005544be9d85231a9e0d5f23b2d15b3311667e2dad0debd344918a3f80"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-utgard-client-x64"
+    },
+    {
+      "spdxElementId": "SPDXRef-utgard-client-x64",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-parson"
+    },
+    {
+      "spdxElementId": "SPDXRef-utgard-client-x64",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-puff"
+    },
+    {
+      "spdxElementId": "SPDXRef-utgard-client-x64",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-ruslan-display"
+    },
+    {
+      "spdxElementId": "SPDXRef-utgard-client-x64",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-lucide"
+    },
+    {
+      "spdxElementId": "SPDXRef-sing-box-x64",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-utgard-client-x64"
+    },
+    {
+      "spdxElementId": "SPDXRef-amneziawg-x64",
+      "relationshipType": "OPTIONAL_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-utgard-client-x64"
+    },
+    {
+      "spdxElementId": "SPDXRef-amneziawg-x64",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-wintun-x64"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-utgard-client-arm64"
+    },
+    {
+      "spdxElementId": "SPDXRef-utgard-client-arm64",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-parson"
+    },
+    {
+      "spdxElementId": "SPDXRef-utgard-client-arm64",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-puff"
+    },
+    {
+      "spdxElementId": "SPDXRef-utgard-client-arm64",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-ruslan-display"
+    },
+    {
+      "spdxElementId": "SPDXRef-utgard-client-arm64",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-lucide"
+    },
+    {
+      "spdxElementId": "SPDXRef-sing-box-arm64",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-utgard-client-arm64"
+    },
+    {
+      "spdxElementId": "SPDXRef-amneziawg-arm64",
+      "relationshipType": "OPTIONAL_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-utgard-client-arm64"
+    },
+    {
+      "spdxElementId": "SPDXRef-amneziawg-arm64",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-wintun-arm64"
+    }
+  ]
+}
