@@ -14,9 +14,6 @@ skills-lock.json
 *.sqlite
 *.sqlite3
 
-# IDE
-.vscode/
-
 # Secrets
 .env
 .env.*
