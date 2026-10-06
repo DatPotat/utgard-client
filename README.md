@@ -178,9 +178,16 @@ VPN продолжает работать и после закрытия окн�
 
 Запросы к GitHub, подписке и PAC идут с `User-Agent: utgard/1.0`. Когда VPN включён, соединения устанавливают sing-box и, для AmneziaWG, его служба; PAC helper соединяет трафик напрямую или передаёт в VPN по решению PAC, собственных обращений в интернет у него нет.
 
+### Проверка подлинности
+
+Релизы собираются в GitHub Actions из этого репозитория. К каждому такому релизу приложены:
+- `SHA256SUMS` — контрольные суммы архивов и SBOM. В PowerShell: `Get-FileHash .\utgard-client-<версия>-windows-x64.zip -Algorithm SHA256` — значение должно совпасть со строкой в `SHA256SUMS`;
+- `utgard-client-<версия>.spdx.json` — SBOM в формате SPDX: из чего состоит релиз и какие компоненты Utgard скачивает сам;
+- аттестация происхождения для каждого архива. Проверка с помощью [GitHub CLI](https://cli.github.com/): `gh attestation verify utgard-client-<версия>-windows-x64.zip --repo DatPotat/utgard-client`.
+
 ### Сборка из исходников
 
-Нужен mingw-w64 (gcc) для x64 и [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) для arm64 — или llvm-mingw для обеих архитектур (Linux, MSYS2 или Git Bash с w64devkit).
+Нужен mingw-w64 (gcc) для x64 и [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) для arm64 — или llvm-mingw для обеих архитектур (Linux, MSYS2 или Git Bash с w64devkit). Релизы собираются в GitHub Actions (`.github/workflows/build.yml`): обе архитектуры — llvm-mingw 20260922, закреплённым по SHA-256, там же выполняются тесты, в том числе на Windows x64 и arm64.
 
 ```sh
 sh build.sh              # обе архитектуры
@@ -214,6 +221,10 @@ Utgard Client — **MIT** (`licenses\UTGARD-MIT.txt`). Подробно о ст�
 - скачиваются из официальных релизов и работают отдельными программами: **sing-box** (GPL-3.0-or-later с дополнительной оговоркой об имени проекта, файл лицензии лежит рядом с `sing-box.exe`, исходный код — https://github.com/SagerNet/sing-box), **AmneziaWG для Windows** (MIT, https://github.com/amnezia-vpn/amneziawg-windows-client) с **Wintun** (Prebuilt Binaries License WireGuard LLC).
 
 Сглаживание интерфейса использует системный GDI+ (`gdiplus.dll`), загружаемый только из System32.
+
+### Безопасность и участие
+
+О найденной уязвимости сообщайте приватно, как описано в `SECURITY.md`; исправления выходят только для последней версии. Правила участия в разработке, в том числе подпись коммитов (DCO), — в `CONTRIBUTING.md`.
 
 ## Отказ от гарантий
 
