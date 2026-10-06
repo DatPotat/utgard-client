@@ -61,11 +61,16 @@ jobs:
 
       - name: Package
         run: |
+          ver=$(sed -n 's/^#define UTGARD_VERSION "\(.*\)"$/\1/p' src/version.h)
+          test -n "$ver"
+          grep -q "\"versionInfo\": \"$ver\"" sbom/utgard-client.spdx.json ||
+            { echo "::error::sbom/utgard-client.spdx.json is not updated for $ver"; exit 1; }
+          cp sbom/utgard-client.spdx.json "release/utgard-client-$ver.spdx.json"
           cd release
           for d in utgard-client-*-windows-*; do
             zip -qrX "$d.zip" "$d"
           done
-          sha256sum -- *.zip > SHA256SUMS
+          sha256sum -- *.zip *.spdx.json > SHA256SUMS
           cat SHA256SUMS
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -73,6 +78,7 @@ jobs:
           name: release
           path: |
             release/*.zip
+            release/*.spdx.json
             release/SHA256SUMS
           if-no-files-found: error
 
